@@ -62,7 +62,7 @@ Use **Add account** in the sidebar for others: give it a name and the account's 
 `~/.claude-usage-dashboard.json`, and usage history in `~/.claude-usage-history.json`
 (or in `DATA_DIR` if you set it).
 
-On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Code with `~/.claude-work` and Claude Desktop with a separate Work app profile. Copy it to your Desktop if you want a shortcut. Sign in to Claude Code and Desktop Work profiles separately once.
+On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Desktop with a separate Work app profile. Double-clicking it no longer leaves an unused Claude Code console running. Copy it and [scripts/claude-work.vbs](scripts/claude-work.vbs) to your Desktop, then double-click the `.vbs` file for a fully hidden launcher console. Run `claude-work.cmd --cli` from a terminal when you want interactive Work Claude Code; other arguments pass through to the CLI. Sign in to Claude Code and Desktop Work profiles separately once.
 
 ## Share local Claude Code chats
 
