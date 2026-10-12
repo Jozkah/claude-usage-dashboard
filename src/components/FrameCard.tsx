@@ -9,13 +9,14 @@ interface Props {
   bodyClassName?: string;
   delay?: number;
   beam?: boolean;
+  onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
 /**
  * Framed card: a soft grey outer frame with a title row, and a white inner
  * card that follows the cursor with a faint spotlight.
  */
-export function FrameCard({ icon, title, right, children, className = '', bodyClassName = '', delay = 0, beam = false }: Props) {
+export function FrameCard({ icon, title, right, children, className = '', bodyClassName = '', delay = 0, beam = false, onContextMenu }: Props) {
   const onMove = (e: MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`);
@@ -23,6 +24,7 @@ export function FrameCard({ icon, title, right, children, className = '', bodyCl
   };
   return (
     <section
+      onContextMenu={onContextMenu}
       className={`animate-rise flex min-w-0 flex-col rounded-xl border border-line bg-frame ${className}`}
       style={{ animationDelay: `${delay}ms` }}
     >

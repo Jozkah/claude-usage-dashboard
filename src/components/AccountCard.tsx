@@ -1,4 +1,5 @@
 import { KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtClock, fmtDur, levelFor, mainWindows, paceFor } from '../lib/format';
 import { Chip } from './Chip';
@@ -10,6 +11,7 @@ interface Props {
   now: number;
   delay: number;
   onRemove: (a: Account) => void;
+  onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
 function Gauge({ w, now }: { w: UsageWindow; now: number }) {
@@ -82,7 +84,7 @@ function Bar({ w, now }: { w: UsageWindow; now: number }) {
   );
 }
 
-export function AccountCard({ account: a, now, delay, onRemove }: Props) {
+export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }: Props) {
   const remove = (
     <button
       onClick={() => onRemove(a)}
@@ -102,7 +104,7 @@ export function AccountCard({ account: a, now, delay, onRemove }: Props) {
   if (a.status !== 'ok' || !a.windows?.length) {
     const Icon = a.status === 'no_login' ? KeyRound : a.status === 'expired' ? KeyRound : a.status === 'error' ? WifiOff : TriangleAlert;
     return (
-      <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay}>
+      <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay} onContextMenu={onContextMenu}>
         <div className="flex gap-3 p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/12 text-warn"><Icon className="size-4" /></div>
           <div className="min-w-0">
@@ -127,6 +129,7 @@ export function AccountCard({ account: a, now, delay, onRemove }: Props) {
       right={right}
       delay={delay}
       beam={critical}
+      onContextMenu={onContextMenu}
     >
       <div className="p-3">
         <div className="grid grid-cols-2 gap-3">
@@ -136,7 +139,7 @@ export function AccountCard({ account: a, now, delay, onRemove }: Props) {
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} />)}</div>
         )}
         <Chats a={a} now={now} />
-        {a.stale && <p className="mt-3 px-1 text-xs text-warn">Showing the last good reading. {a.staleMessage}</p>}
+        {a.stale && <p className="mt-3 px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}
         <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
       </div>
     </FrameCard>

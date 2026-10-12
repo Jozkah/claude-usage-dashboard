@@ -18,6 +18,10 @@ import crypto from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
+import { createUsageSnapshot } from './usage-snapshot.js';
+import { shareLocalChats } from './chat-sharing.js';
+import { findWindowsDesktopProfiles, syncDesktopSessionRecords } from './desktop-chat-sync.js';
+import { syncCodeSetup } from './code-setup-sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, '..', 'dist');
@@ -35,6 +39,7 @@ const ALLOWED_HOSTS = new Set([
 
 const CONFIG_FILE = path.join(DATA_DIR, '.claude-usage-dashboard.json');
 const HISTORY_FILE = path.join(DATA_DIR, '.claude-usage-history.json');
+const USAGE_SNAPSHOT_FILE = path.join(DATA_DIR, '.claude-usage-latest.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
@@ -345,8 +350,10 @@ function getHistory(id, key, rangeKey) {
 /* ------------------------------------------------------------------ */
 
 const cache = new Map();
+const latestUsage = MOCK ? null : createUsageSnapshot(USAGE_SNAPSHOT_FILE);
 
 async function getStatus(acc, index, force) {
+  latestUsage?.seedFromHistory(acc, history[acc.id], LABELS);
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
   if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
@@ -355,11 +362,12 @@ async function getStatus(acc, index, force) {
   if (hit && bo && Date.now() < bo.until && !(force && age > 30 * 1000)) return hit.value;
 
   let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
-  if (value.status === 'error' && hit && hit.value.status === 'ok') {
-    value = { ...hit.value, stale: true, staleMessage: value.message };
-  } else if (value.status === 'ok') {
+  if (value.status === 'ok') {
     backoff.delete(acc.id);
     recordHistory(acc.id, value.windows);
+    latestUsage?.remember(acc, value);
+  } else if (latestUsage) {
+    value = latestUsage.fallback(acc, value);
   }
   cache.set(acc.id, { at: Date.now(), value });
   return value;
@@ -465,11 +473,60 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/chats/share') {
+      if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local chat sharing requires a direct installation.' });
+      if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {
+        return sendJson(res, 403, { error: 'Forbidden' });
+      }
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const accounts = loadAccounts();
+      const source = accounts.find((account) => account.id === body.sourceId);
+      const target = accounts.find((account) => account.id === body.targetId);
+      if (!source || !target || source.id === target.id) return sendJson(res, 400, { error: 'Choose two different accounts.' });
+      try {
+        const result = shareLocalChats(expandHome(source.configDir), expandHome(target.configDir));
+        return sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        return sendJson(res, 409, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/chats/sync-desktop') {
+      if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop chat sync requires a direct installation.' });
+      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      const accounts = loadAccounts();
+      const personal = accounts.find((account) => account.id === 'personal');
+      const work = accounts.find((account) => account.id === 'work');
+      if (!personal || !work) return sendJson(res, 400, { error: 'Personal and Work accounts are required.' });
+      try {
+        shareLocalChats(expandHome(personal.configDir), expandHome(work.configDir));
+        const profiles = findWindowsDesktopProfiles();
+        return sendJson(res, 200, syncDesktopSessionRecords(profiles.personal, profiles.work));
+      } catch (error) {
+        return sendJson(res, 409, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/code-setup/sync') {
+      if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local setup sync requires a direct installation.' });
+      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      const accounts = loadAccounts();
+      const personal = accounts.find((account) => account.id === 'personal');
+      const work = accounts.find((account) => account.id === 'work');
+      if (!personal || !work) return sendJson(res, 400, { error: 'Personal and Work accounts are required.' });
+      try {
+        return sendJson(res, 200, syncCodeSetup(expandHome(personal.configDir), expandHome(work.configDir)));
+      } catch (error) {
+        return sendJson(res, 409, { error: error.message });
+      }
+    }
+
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/accounts/')) {
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
       const id = decodeURIComponent(url.pathname.slice('/api/accounts/'.length));
       saveAccounts(loadAccounts().filter((a) => a.id !== id));
       cache.delete(id);
+      latestUsage?.forget(id);
       return sendJson(res, 200, { ok: true });
     }
 

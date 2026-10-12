@@ -62,6 +62,18 @@ Use **Add account** in the sidebar for others: give it a name and the account's 
 `~/.claude-usage-dashboard.json`, and usage history in `~/.claude-usage-history.json`
 (or in `DATA_DIR` if you set it).
 
+## Share local Claude Code chats
+
+Right-click Work account card, then choose **Share Personal CLI chats with Work**. Dashboard links Work's `projects` folder to Personal's local Claude Code transcripts. In Work Desktop Code, start a local session and type `/resume` to search and open a CLI chat.
+
+For local Desktop chats, choose **Sync local Desktop chats both ways** in the same menu. On Windows, this copies missing Desktop session records between Personal and Work profiles. Reopen Desktop to refresh Recents. Existing records are never overwritten; repeat sync after creating new chats in either profile. The full conversation was verified to load in Work after copying a Personal record. Account logins stay separate. Avoid editing the same session concurrently in both profiles. Cloud chats, account-specific connectors, and Customize plugins do not move with local session records.
+
+Choose **Copy local Code plugins and skills to Work** to copy missing locally installed plugins, their cache and marketplaces, and local skills from Personal. It preserves Work's existing plugin choices and never copies login files, hooks, permission settings, or account-managed skills. This copies about 300 MB on a typical configured machine. Claude Desktop Customize plugins and connectors sync through each Claude account separately and cannot be copied by this dashboard.
+
+Desktop groups sessions by their recorded working folders. To see a flat list instead of many `scratch-*` groups, turn off **Group by project** in the controls above Recents.
+
+This action needs dashboard running directly on same computer as Claude Code. It is unavailable in Docker demo mode and cannot link a read-only container mount.
+
 ## Settings (environment variables)
 
 | Variable | Default | What it does |
@@ -85,6 +97,15 @@ That lets anyone on your network see your usage percentages (never your logins).
   change or stop working without notice. If the format changes, the card shows the raw response.
 - It never refreshes or changes a login. If a card says the login expired, open Claude Code with
   that account once.
-- History starts when you first run the dashboard and grows while it is running.
+- History starts when you first run the dashboard and grows while it is running. The latest
+  successful usage reading is also saved in `~/.claude-usage-latest.json` (or `DATA_DIR`). If a
+  later reading fails, the dashboard shows that saved reading with its timestamp until live usage
+  works again.
+  Existing history supplies a one-time fallback until the next successful live reading; its
+  reset times are unavailable.
+- Local chat-log cost estimates use [Anthropic's API prices](https://platform.claude.com/docs/en/about-claude/pricing),
+  including model-specific prompt caching, Haiku 5.5 long prompts, and recorded fast mode,
+  US inference, batch, and web search usage. Changing the price table rebuilds saved estimates
+  from chat logs. Estimates are not subscription charges.
 - The trend charts, rings and counters are animated. Animations switch off automatically if your
   system asks for reduced motion.

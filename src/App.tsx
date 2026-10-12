@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { WifiOff } from 'lucide-react';
-import { removeAccount, useNow, useTheme, useUsage } from './lib/api';
+import { removeAccount, shareLocalChats, syncCodeSetup, syncDesktopChats, useNow, useTheme, useUsage } from './lib/api';
 import type { Account, RangeKey } from './lib/types';
 import { Aurora } from './components/Aurora';
 import { Header } from './components/Header';
@@ -25,12 +25,54 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [toRemove, setToRemove] = useState<Account | null>(null);
+  const [contextAccount, setContextAccount] = useState<{ account: Account; x: number; y: number } | null>(null);
+  const [chatShareMessage, setChatShareMessage] = useState<string | null>(null);
 
   const accounts = data?.accounts ?? [];
   const visible = selected === 'all' ? accounts : accounts.filter((a) => a.id === selected);
   const tick = data?.serverTime ?? 0;
 
   // fall back to the overview if the selected account disappears
+  useEffect(() => {
+    const blockContextMenu = (e: globalThis.MouseEvent) => e.preventDefault();
+    window.addEventListener('contextmenu', blockContextMenu);
+    return () => window.removeEventListener('contextmenu', blockContextMenu);
+  }, []);
+
+  useEffect(() => {
+    if (!contextAccount) return;
+    const close = () => setContextAccount(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, [contextAccount]);
+
+  const openAccountMenu = (account: Account, e: MouseEvent) => {
+    e.preventDefault();
+    setContextAccount({ account, x: e.clientX, y: e.clientY });
+  };
+
+  const syncChats = async (target: Account) => {
+    const source = accounts.find((account) => account.id === 'personal' && account.id !== target.id);
+    if (!source) return;
+    try { setChatShareMessage(await shareLocalChats(source.id, target.id)); }
+    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not share local chats.'); }
+    setContextAccount(null);
+  };
+
+  const syncDesktop = async () => {
+    try { setChatShareMessage(await syncDesktopChats()); }
+    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync Desktop sessions.'); }
+    setContextAccount(null);
+  };
+
+  const syncPlugins = async () => {
+    try { setChatShareMessage(await syncCodeSetup()); }
+    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync local Claude Code setup.'); }
+    setContextAccount(null);
+  };
+
   useEffect(() => {
     if (selected !== 'all' && data && !accounts.some((a) => a.id === selected)) setSelected('all');
   }, [data, accounts, selected]);
@@ -118,6 +160,8 @@ export default function App() {
             </div>
           )}
 
+          {chatShareMessage && <div role="status" className="mb-5 rounded-xl border border-line bg-card px-4 py-3 text-sm">{chatShareMessage}</div>}
+
           {!data && !error && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[0, 1, 2, 3].map((i) => <div key={i} className="h-[178px] animate-pulse rounded-xl border border-line bg-frame" />)}
@@ -143,7 +187,7 @@ export default function App() {
               </div>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))]">
                 {visible.map((a, i) => (
-                  <AccountCard key={a.id} account={a} now={now} delay={i * 80} onRemove={setToRemove} />
+                  <AccountCard key={a.id} account={a} now={now} delay={i * 80} onRemove={setToRemove} onContextMenu={(e) => openAccountMenu(a, e)} />
                 ))}
               </div>
               {visible.length === 0 && (
@@ -166,6 +210,35 @@ export default function App() {
       </div>
 
       <AddAccountDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => void refresh(true)} />
+      {contextAccount && (
+        <div
+          role="menu"
+          aria-label={`${contextAccount.account.name} account actions`}
+          className="fixed z-50 w-64 rounded-xl border border-line bg-card p-3 text-sm shadow-2xl"
+          style={{ left: Math.max(8, Math.min(contextAccount.x, window.innerWidth - 272)), top: Math.max(8, Math.min(contextAccount.y, window.innerHeight - 240)) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="font-medium">{contextAccount.account.name}</div>
+          <p className="mt-1 text-xs text-muted-fg">Claude Desktop login is separate. Open its profile menu, log out, then sign in to this account.</p>
+          {accounts.some((account) => account.id === 'personal') && contextAccount.account.id !== 'personal' && (
+            <>
+              <button role="menuitem" className="mt-3 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncChats(contextAccount.account)}>
+                Share Personal CLI chats with {contextAccount.account.name}
+              </button>
+              {contextAccount.account.id === 'work' && (
+                <>
+                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncDesktop()}>
+                    Sync local Desktop chats both ways
+                  </button>
+                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncPlugins()}>
+                    Copy local Code plugins and skills to Work
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <Modal open={!!toRemove} onClose={() => setToRemove(null)} title="Remove account?">
         <p className="text-sm text-muted-fg">

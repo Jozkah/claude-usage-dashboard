@@ -8,34 +8,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-
-/* ---------------------------- pricing (USD per 1M tokens) ---------------------------- */
-
-function priceFor(model) {
-  const m = String(model || '').toLowerCase();
-  if (!m || m.startsWith('<')) return null;
-  if (m.includes('opus')) {
-    // Opus 3 / 4 / 4.1 were priced 15/75; 4.5 and later are 5/25.
-    if (/opus-3|3-opus|opus-4(-[01])?(-\d{8})?$/.test(m)) return { i: 15, o: 75 };
-    return { i: 5, o: 25 };
-  }
-  if (m.includes('sonnet')) return { i: 3, o: 15 };
-  if (m.includes('haiku')) {
-    if (/3-5-haiku|haiku-3-5/.test(m)) return { i: 0.8, o: 4 };
-    if (/haiku-3(-|$)|3-haiku/.test(m)) return { i: 0.25, o: 1.25 };
-    return { i: 1, o: 5 };
-  }
-  return null; // unknown model: counted in tokens, left out of the cost estimate
-}
-
-function costOf(p, u) {
-  if (!p) return 0;
-  return (u.in * p.i + u.out * p.o + u.cr * p.i * 0.1 + u.c5 * p.i * 1.25 + u.c1 * p.i * 2) / 1e6;
-}
+import { PRICING_VERSION, priceFor, costOf } from './pricing.js';
 
 /* ---------------------------------- state ---------------------------------- */
 
-const state = { v: 1, files: {}, days: {} };
+const state = { v: PRICING_VERSION, files: {}, days: {} };
 const progress = { scanning: false, ready: false, done: 0, total: 0, updatedAt: 0 };
 let stateFile = null;
 let dirty = false;
@@ -43,7 +20,7 @@ let dirty = false;
 function loadState(file) {
   try {
     const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (j && j.v === 1) {
+    if (j && j.v === PRICING_VERSION) {
       state.files = j.files || {};
       state.days = j.days || {};
       progress.ready = true;
@@ -118,6 +95,10 @@ function ingest(line, f) {
     out: Number(u.output_tokens) || 0,
     cr: Number(u.cache_read_input_tokens) || 0,
     c5, c1,
+    speed: u.speed,
+    geo: u.inference_geo,
+    tier: u.service_tier,
+    search: Number(u.server_tool_use?.web_search_requests) || 0,
   };
   if (f.pending && rec.id && f.pending.id === rec.id) { f.pending = rec; return; }
   if (f.pending) commit(f.pending);

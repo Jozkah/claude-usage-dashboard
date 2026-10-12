@@ -231,7 +231,7 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
 
             <p className="mt-4 text-[11.5px] leading-relaxed text-subtle-fg">
               Read from the chat logs on this computer, so phone and other-PC usage is not included here (it is in the limit gauges above).
-              Cost is an estimate at public API prices, not what your plan charges
+              Cost uses <a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noreferrer" className="underline">Anthropic’s public API prices</a>, not what your plan charges. Fast mode, US inference, batch pricing, and web searches are included when recorded in the logs
               {view.unpriced > 0 ? `; ${tok(view.unpriced)} tokens from models without a known price are counted in tokens only` : ''}.
               Logs are shared by all accounts on this PC, so this is a combined total.
             </p>

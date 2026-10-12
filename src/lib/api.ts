@@ -30,6 +30,30 @@ export async function removeAccount(id: string): Promise<void> {
   await fetch('/api/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
 }
 
+export async function shareLocalChats(sourceId: string, targetId: string): Promise<string> {
+  const res = await fetch('/api/chats/share', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceId, targetId }),
+  });
+  const result = (await res.json()) as { error?: string; alreadyShared?: boolean };
+  if (!res.ok) throw new Error(result.error || 'Could not share local chats.');
+  return `${result.alreadyShared ? 'Local chats already shared.' : 'Local chats shared.'} In Work Desktop Code, start a local session and type /resume to pick a chat.`;
+}
+
+export async function syncDesktopChats(): Promise<string> {
+  const res = await fetch('/api/chats/sync-desktop', { method: 'POST' });
+  const result = (await res.json()) as { error?: string; toWork?: number; toPersonal?: number };
+  if (!res.ok) throw new Error(result.error || 'Could not sync Desktop sessions.');
+  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. Reopen Claude Desktop to refresh Recents.`;
+}
+
+export async function syncCodeSetup(): Promise<string> {
+  const res = await fetch('/api/code-setup/sync', { method: 'POST' });
+  const result = (await res.json()) as { error?: string; plugins?: number };
+  if (!res.ok) throw new Error(result.error || 'Could not sync local Claude Code setup.');
+  return `Copied ${result.plugins ?? 0} local plugins plus missing skills to Work. Restart Claude Code or Desktop to reload them.`;
+}
+
 /** Polls the API every minute; `refresh(true)` forces a fresh reading. */
 export function useUsage() {
   const [data, setData] = useState<UsageResponse | null>(null);

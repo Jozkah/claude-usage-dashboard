@@ -17,7 +17,7 @@ services:
       # Needed if you open it from another device or use a different host name:
       # ALLOWED_HOSTS: "my-pc.local,192.168.1.50"
       # ALLOW_ANY_HOST: "1"
-      TZ: Europe/Lisbon
+      TZ: ${TZ:-UTC}
     volumes:
       - ~/.claude:/accounts/personal:ro
       - ~/.claude-work:/accounts/work:ro
