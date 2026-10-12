@@ -31,6 +31,35 @@ function Gauge({ w, now }: { w: UsageWindow; now: number }) {
   );
 }
 
+function Chats({ a, now }: { a: Account; now: number }) {
+  const list = a.sessions ?? [];
+  if (!list.length) return null;
+  const working = list.filter((s) => s.working).length;
+  const shown = list.slice(0, 4);
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-frame/50 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium">
+        <span>Chats</span>
+        <span className="text-muted-fg tabular-nums">
+          {working > 0 ? `${working} working · ` : ''}{list.length} open
+        </span>
+      </div>
+      <ul className="flex flex-col gap-1">
+        {shown.map((s) => (
+          <li key={s.id} className="flex items-center gap-2 text-[12.5px]">
+            <span className={s.working ? 'live-dot' : 'size-2 shrink-0 rounded-full bg-subtle-fg/50'} />
+            <span className="truncate">{s.name || s.folder || 'Untitled chat'}</span>
+            <span className="ml-auto shrink-0 text-[11.5px] text-subtle-fg tabular-nums">
+              {s.working ? 'now' : `${fmtDur(now - s.lastActiveAt)} ago`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {list.length > shown.length && <div className="mt-1 text-[11.5px] text-subtle-fg">+{list.length - shown.length} more</div>}
+    </div>
+  );
+}
+
 function Bar({ w, now }: { w: UsageWindow; now: number }) {
   return (
     <div>
@@ -82,6 +111,7 @@ export function AccountCard({ account: a, now, delay, onRemove }: Props) {
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>
         </div>
+        <div className="px-4 pb-4 -mt-1"><Chats a={a} now={now} /></div>
       </FrameCard>
     );
   }
@@ -105,6 +135,7 @@ export function AccountCard({ account: a, now, delay, onRemove }: Props) {
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} />)}</div>
         )}
+        <Chats a={a} now={now} />
         {a.stale && <p className="mt-3 px-1 text-xs text-warn">Showing the last good reading. {a.staleMessage}</p>}
         <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
       </div>

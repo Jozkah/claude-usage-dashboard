@@ -139,15 +139,15 @@ const LABELS = {
   extra_usage: 'Extra usage',
 };
 
-const prettify = (key) => cap(key.replace(/_/g, ' '));
-
 function parseWindows(data) {
   const out = [];
   for (const [key, v] of Object.entries(data || {})) {
+    // Anthropic also returns unnamed codename keys (e.g. iguana_necktie); skip anything we can't label.
+    if (!LABELS[key]) continue;
     if (v && typeof v === 'object' && typeof v.utilization === 'number') {
       out.push({
         key,
-        label: LABELS[key] || prettify(key),
+        label: LABELS[key],
         used: Math.max(0, Math.min(100, Math.round(v.utilization * 10) / 10)),
         resetsAt: v.resets_at || null,
       });
@@ -155,6 +155,42 @@ function parseWindows(data) {
   }
   const rank = (k) => (k === 'five_hour' ? 0 : k === 'seven_day' ? 1 : 2);
   out.sort((a, b) => rank(a.key) - rank(b.key));
+  return out;
+}
+
+/* Open Claude Code chats for one account. Claude Code writes <configDir>/sessions/<pid>.json
+   for every running session and touches it while the chat is working. */
+const WORKING_MS = 2 * 60 * 1000;
+
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; }
+}
+
+function readSessions(configDir) {
+  const dir = path.join(configDir, 'sessions');
+  let files;
+  try { files = fs.readdirSync(dir).filter((f) => /^\d+\.json$/.test(f)); } catch { return []; }
+  const inContainer = Boolean(ACCOUNTS_DIR); // pids from the host are not visible inside Docker
+  const out = [];
+  for (const f of files) {
+    try {
+      const file = path.join(dir, f);
+      const mtime = fs.statSync(file).mtimeMs;
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const alive = inContainer ? Date.now() - mtime < 10 * 60 * 1000 : pidAlive(j.pid);
+      if (!alive) continue;
+      out.push({
+        id: String(j.sessionId || j.pid),
+        name: String(j.name || '').slice(0, 80) || null,
+        folder: String(j.cwd || '').split(/[\\/]/).filter(Boolean).pop() || null,
+        where: String(j.entrypoint || '').replace(/^claude-/, '') || null,
+        startedAt: Number(j.startedAt) || null,
+        lastActiveAt: mtime,
+        working: Date.now() - mtime < WORKING_MS,
+      });
+    } catch { /* unreadable file: ignore */ }
+  }
+  out.sort((a, b) => Number(b.working) - Number(a.working) || b.lastActiveAt - a.lastActiveAt);
   return out;
 }
 
@@ -394,7 +430,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       const force = url.searchParams.get('force') === '1';
       const accounts = loadAccounts();
-      const list = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
+      const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
+      // sessions are read fresh on every request (cheap, local), usage is cached
+      const list = statuses.map((v, i) => ({ ...v, sessions: MOCK ? [] : readSessions(expandHome(accounts[i].configDir)) }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
 

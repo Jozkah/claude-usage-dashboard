@@ -5,6 +5,16 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 
+export interface ChatSession {
+  id: string;
+  name: string | null;
+  folder: string | null;
+  where: string | null;
+  startedAt: number | null;
+  lastActiveAt: number;
+  working: boolean;
+}
+
 export type AccountStatus = 'ok' | 'no_login' | 'expired' | 'error';
 
 export interface Account {
@@ -16,6 +26,7 @@ export interface Account {
   status: AccountStatus;
   message?: string;
   windows?: UsageWindow[];
+  sessions?: ChatSession[];
   raw?: unknown;
   stale?: boolean;
   staleMessage?: string;

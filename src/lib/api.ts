@@ -57,7 +57,7 @@ export function useUsage() {
 
   useEffect(() => {
     void refresh(false);
-    const id = setInterval(() => void refresh(false), 60_000);
+    const id = setInterval(() => void refresh(false), 15_000); // usage is cached server-side; this keeps open chats live
     return () => clearInterval(id);
   }, [refresh]);
 
