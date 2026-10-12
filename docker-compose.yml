@@ -1,0 +1,27 @@
+# Run with:  docker compose up -d --build     then open http://localhost:4777
+#
+# Each folder under /accounts becomes one account on the dashboard
+# (the folder name is the account name). Mounted read-only: the dashboard
+# only reads the login file and never changes it.
+#
+# Add another account: add one more line under "volumes".
+# Windows paths look like  C:/Users/you/.claude:/accounts/personal:ro
+services:
+  claude-usage:
+    build: .
+    container_name: claude-usage
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4777:4777"   # only this computer. Remove "127.0.0.1:" to open it to your network.
+    environment:
+      # Needed if you open it from another device or use a different host name:
+      # ALLOWED_HOSTS: "my-pc.local,192.168.1.50"
+      # ALLOW_ANY_HOST: "1"
+      TZ: Europe/Lisbon
+    volumes:
+      - ~/.claude:/accounts/personal:ro
+      - ~/.claude-work:/accounts/work:ro
+      - usage-data:/data
+
+volumes:
+  usage-data:

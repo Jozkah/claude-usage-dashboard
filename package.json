@@ -1,0 +1,35 @@
+{
+  "name": "claude-usage-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Live usage limits for every Claude account you track.",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c gray,cyan \"cross-env NO_OPEN=1 node --watch server/index.js\" \"vite\"",
+    "dev:mock": "cross-env MOCK=1 npm run dev",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.js",
+    "start:mock": "cross-env MOCK=1 node server/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "motion": "^11.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}
