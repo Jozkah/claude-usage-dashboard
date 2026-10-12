@@ -182,8 +182,8 @@ async function fetchStatus(acc) {
       const ra = Number(res.headers.get('retry-after'));
       const prev = backoff.get(acc.id);
       const wait = Number.isFinite(ra) && ra > 0
-        ? Math.min(ra * 1000, 60 * 60 * 1000)
-        : Math.min((prev ? prev.wait : 2.5 * 60 * 1000) * 2, 30 * 60 * 1000);
+        ? Math.min(ra * 1000, 5 * 60 * 1000)
+        : Math.min((prev ? prev.wait : 60 * 1000) * 2, 5 * 60 * 1000);
       backoff.set(acc.id, { until: Date.now() + wait, wait });
       return { ...base, plan, status: 'error', retryAt: Date.now() + wait, message: 'Anthropic is rate limiting the usage endpoint. Backing off; next try in ' + Math.ceil(wait / 60000) + ' min.' };
     }
@@ -315,7 +315,7 @@ async function getStatus(acc, index, force) {
   if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
   // while backing off after a 429, never touch the endpoint (even on manual refresh)
   const bo = backoff.get(acc.id);
-  if (hit && bo && Date.now() < bo.until) return hit.value;
+  if (hit && bo && Date.now() < bo.until && !(force && age > 30 * 1000)) return hit.value;
 
   let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
   if (value.status === 'error' && hit && hit.value.status === 'ok') {
