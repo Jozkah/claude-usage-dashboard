@@ -36,6 +36,7 @@ const CONFIG_FILE = path.join(DATA_DIR, '.claude-usage-dashboard.json');
 const HISTORY_FILE = path.join(DATA_DIR, '.claude-usage-history.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
+const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
 
@@ -178,7 +179,13 @@ async function fetchStatus(acc) {
       return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
     }
     if (res.status === 429) {
-      return { ...base, plan, status: 'error', message: 'The usage endpoint is rate limiting requests. Will retry shortly.' };
+      const ra = Number(res.headers.get('retry-after'));
+      const prev = backoff.get(acc.id);
+      const wait = Number.isFinite(ra) && ra > 0
+        ? Math.min(ra * 1000, 60 * 60 * 1000)
+        : Math.min((prev ? prev.wait : 2.5 * 60 * 1000) * 2, 30 * 60 * 1000);
+      backoff.set(acc.id, { until: Date.now() + wait, wait });
+      return { ...base, plan, status: 'error', retryAt: Date.now() + wait, message: 'Anthropic is rate limiting the usage endpoint. Backing off; next try in ' + Math.ceil(wait / 60000) + ' min.' };
     }
     if (!res.ok) {
       return { ...base, plan, status: 'error', message: 'Usage endpoint answered HTTP ' + res.status + '.' };
@@ -306,11 +313,15 @@ async function getStatus(acc, index, force) {
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
   if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
+  // while backing off after a 429, never touch the endpoint (even on manual refresh)
+  const bo = backoff.get(acc.id);
+  if (hit && bo && Date.now() < bo.until) return hit.value;
 
   let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
   if (value.status === 'error' && hit && hit.value.status === 'ok') {
     value = { ...hit.value, stale: true, staleMessage: value.message };
   } else if (value.status === 'ok') {
+    backoff.delete(acc.id);
     recordHistory(acc.id, value.windows);
   }
   cache.set(acc.id, { at: Date.now(), value });
