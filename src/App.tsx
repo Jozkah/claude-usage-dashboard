@@ -10,6 +10,7 @@ import { TrendCard } from './components/TrendCard';
 import { ResetTimeline } from './components/ResetTimeline';
 import { AccountCard } from './components/AccountCard';
 import { LimitTable } from './components/LimitTable';
+import { DailyUsage } from './components/DailyUsage';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { Modal } from './components/Modal';
 
@@ -152,6 +153,8 @@ export default function App() {
               )}
 
               <LimitTable accounts={visible} now={now} />
+
+              <DailyUsage />
             </div>
           )}
 

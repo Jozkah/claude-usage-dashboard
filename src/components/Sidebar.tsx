@@ -54,7 +54,6 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
           placeholder="Find account"
           className="w-full bg-transparent text-fg outline-none placeholder:text-muted-fg"
         />
-        <kbd className="rounded border border-line bg-frame px-1.5 py-px text-[10.5px] font-medium">⌘K</kbd>
       </label>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -94,7 +93,7 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
       <div className="flex items-center gap-2.5 rounded-xl border border-line bg-card p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <span className="live-dot ml-1" />
         <div className="min-w-0 text-xs leading-tight">
-          <div className="font-medium">Live · every minute</div>
+          <div className="font-medium">Live</div>
           <div className="text-subtle-fg">{lastLoad ? `Updated ${fmtAgo(now - lastLoad)}` : 'Connecting…'}</div>
         </div>
       </div>

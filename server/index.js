@@ -17,6 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, '..', 'dist');
@@ -436,6 +437,11 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/tokens') {
+      const days = Math.max(1, Math.min(365, Number(url.searchParams.get('days')) || 30));
+      return sendJson(res, 200, MOCK ? mockTokenReport(days) : getTokenReport(days));
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/history') {
       const id = url.searchParams.get('id') || '';
       const key = url.searchParams.get('key') || 'five_hour';
@@ -487,6 +493,20 @@ server.on('error', (e) => {
   }
   process.exit(1);
 });
+
+if (!MOCK) {
+  // Chat logs to read. Accounts that share a folder (junction) are only read once.
+  startTokenScanner({
+    file: path.join(DATA_DIR, '.claude-usage-tokens.json'),
+    getRoots: () => {
+      const seen = new Set();
+      for (const a of loadAccounts()) {
+        try { seen.add(fs.realpathSync(path.join(expandHome(a.configDir), 'projects'))); } catch { /* no logs yet */ }
+      }
+      return [...seen];
+    },
+  });
+}
 
 server.listen(PORT, HOST, () => {
   const url = `http://localhost:${PORT}`;

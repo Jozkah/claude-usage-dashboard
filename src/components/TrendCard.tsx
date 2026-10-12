@@ -6,6 +6,7 @@ import { useHistory } from '../lib/api';
 import { AnimatedNumber } from './AnimatedNumber';
 import { FrameCard } from './FrameCard';
 import { UsageChart } from './UsageChart';
+import { Select } from './Select';
 
 interface Props {
   accounts: Account[];
@@ -14,9 +15,6 @@ interface Props {
   range: RangeKey;
   onRange: (r: RangeKey) => void;
 }
-
-const selectCls =
-  'rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs font-medium outline-none transition-shadow focus:ring-2 focus:ring-accent/40';
 
 export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props) {
   const okAccounts = accounts.filter((a) => a.status === 'ok' && a.windows?.length);
@@ -67,12 +65,8 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
             </div>
           </div>
           <div className="flex gap-2">
-            <select className={selectCls} value={acc?.id ?? ''} onChange={(e) => { setAccId(e.target.value); }} aria-label="Account">
-              {okAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-            <select className={selectCls} value={win?.key ?? ''} onChange={(e) => setKey(e.target.value)} aria-label="Limit">
-              {windows.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
-            </select>
+            <Select label="Account" value={acc?.id ?? ''} onChange={setAccId} options={okAccounts.map((a) => ({ value: a.id, label: a.name }))} />
+            <Select label="Limit" value={win?.key ?? ''} onChange={setKey} options={windows.map((w) => ({ value: w.key, label: w.label }))} />
           </div>
         </div>
         <div className="mt-4">
