@@ -6,7 +6,7 @@
   "description": "Live usage limits for every Claude account you track.",
   "engines": { "node": ">=18" },
   "scripts": {
-    "dev": "concurrently -k -n api,web -c gray,cyan \"cross-env NO_OPEN=1 node --watch server/index.js\" \"vite\"",
+    "dev": "concurrently -k -n api,web -c gray,cyan \"cross-env NO_OPEN=1 node --watch server/index.js\" \"cross-env NODE_ENV=development vite\"",
     "dev:mock": "cross-env MOCK=1 npm run dev",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.js",
