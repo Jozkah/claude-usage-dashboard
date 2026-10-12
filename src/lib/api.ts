@@ -44,7 +44,7 @@ export async function syncDesktopChats(): Promise<string> {
   const res = await fetch('/api/chats/sync-desktop', { method: 'POST' });
   const result = (await res.json()) as { error?: string; toWork?: number; toPersonal?: number };
   if (!res.ok) throw new Error(result.error || 'Could not sync Desktop sessions.');
-  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. Reopen Claude Desktop to refresh Recents.`;
+  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. Reopen Claude Desktop to refresh Recents. When continuing under another organization, Claude may drop earlier private thinking; conversation text remains.`;
 }
 
 export async function syncCodeSetup(): Promise<string> {

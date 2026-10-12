@@ -62,11 +62,15 @@ Use **Add account** in the sidebar for others: give it a name and the account's 
 `~/.claude-usage-dashboard.json`, and usage history in `~/.claude-usage-history.json`
 (or in `DATA_DIR` if you set it).
 
+On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Code with `~/.claude-work` and Claude Desktop with a separate Work app profile. Copy it to your Desktop if you want a shortcut. Sign in to Claude Code and Desktop Work profiles separately once.
+
 ## Share local Claude Code chats
 
 Right-click Work account card, then choose **Share Personal CLI chats with Work**. Dashboard links Work's `projects` folder to Personal's local Claude Code transcripts. In Work Desktop Code, start a local session and type `/resume` to search and open a CLI chat.
 
 For local Desktop chats, choose **Sync local Desktop chats both ways** in the same menu. On Windows, this copies missing Desktop session records between Personal and Work profiles. Reopen Desktop to refresh Recents. Existing records are never overwritten; repeat sync after creating new chats in either profile. The full conversation was verified to load in Work after copying a Personal record. Account logins stay separate. Avoid editing the same session concurrently in both profiles. Cloud chats, account-specific connectors, and Customize plugins do not move with local session records.
+
+Crossing organizations can show a Claude Code notice about earlier thinking. [Anthropic binds some thinking blocks to the account that created them](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking); another account cannot reuse those blocks. Visible chat history still loads, but Claude must reason again from that history. The dashboard cannot make account-bound private thinking transferable. Run `/compact` after switching if you want Claude to summarize the visible history into a shorter working context; this may use tokens and does not recover old thinking.
 
 Choose **Copy local Code plugins and skills to Work** to copy missing locally installed plugins, their cache and marketplaces, and local skills from Personal. It preserves Work's existing plugin choices and never copies login files, hooks, permission settings, or account-managed skills. This copies about 300 MB on a typical configured machine. Claude Desktop Customize plugins and connectors sync through each Claude account separately and cannot be copied by this dashboard.
 
