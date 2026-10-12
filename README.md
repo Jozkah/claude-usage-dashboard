@@ -6,6 +6,10 @@ pace, history, and which account has the most room right now. Works on Windows, 
 Usage is tracked by Anthropic per account, so what you use on your phone or other computers
 shows up here too.
 
+![Dashboard preview with five sample accounts](assets/dashboard-demo.png)
+
+Screenshot uses five sample accounts and generated usage data. No real account details are shown.
+
 ## Run it
 
 You need [Node.js 18+](https://nodejs.org).

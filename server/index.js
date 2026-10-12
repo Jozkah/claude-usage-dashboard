@@ -79,6 +79,8 @@ let mockAccounts = [
   { id: 'personal', name: 'Personal', configDir: '~/.claude' },
   { id: 'work', name: 'Work', configDir: '~/.claude-work' },
   { id: 'side-project', name: 'Side project', configDir: '~/.claude-side' },
+  { id: 'research', name: 'Research', configDir: '~/.claude-research' },
+  { id: 'studio', name: 'Studio', configDir: '~/.claude-studio' },
 ];
 
 function loadAccounts() {

@@ -93,8 +93,8 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
       <div className="flex items-center gap-2.5 rounded-xl border border-line bg-card p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <span className="live-dot ml-1" />
         <div className="min-w-0 text-xs leading-tight">
-          <div className="font-medium">Live</div>
-          <div className="text-subtle-fg">{lastLoad ? `Updated ${fmtAgo(now - lastLoad)}` : 'Connecting…'}</div>
+          <div className="font-medium">{mock ? 'Demo data' : 'Live'}</div>
+          <div className="text-subtle-fg">{mock ? `${accounts.length} sample accounts` : lastLoad ? `Updated ${fmtAgo(now - lastLoad)}` : 'Connecting…'}</div>
         </div>
       </div>
     </div>
