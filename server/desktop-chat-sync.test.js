@@ -14,13 +14,20 @@ test('copies missing Desktop records both ways and preserves existing records', 
     const w = path.join(work, 'claude-code-sessions', 'work-account', 'device');
     fs.mkdirSync(p, { recursive: true });
     fs.mkdirSync(w, { recursive: true });
-    fs.writeFileSync(path.join(p, 'local_abc.json'), 'personal');
-    fs.writeFileSync(path.join(w, 'local_def.json'), 'work');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 1, toPersonal: 1 });
-    assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), 'personal');
-    assert.equal(fs.readFileSync(path.join(p, 'local_def.json'), 'utf8'), 'work');
-    fs.writeFileSync(path.join(p, 'local_abc.json'), 'changed');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0 });
-    assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), 'personal');
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"personal"}');
+    fs.writeFileSync(path.join(w, 'local_def.json'), '{"title":"work"}');
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 1, toPersonal: 1, conflicts: 0 });
+    assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), '{"title":"personal"}');
+    assert.equal(fs.readFileSync(path.join(p, 'local_def.json'), 'utf8'), '{"title":"work"}');
+    fs.writeFileSync(path.join(w, 'local_123abc.json'), '{"title":"new work session"}');
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 1, conflicts: 0 });
+    assert.equal(fs.readFileSync(path.join(p, 'local_123abc.json'), 'utf8'), '{"title":"new work session"}');
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"changed"}');
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1 });
+    assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), '{"title":"personal"}');
+    fs.writeFileSync(path.join(p, 'local_bad.json'), '{"title":');
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1 });
+    assert.equal(fs.existsSync(path.join(w, 'local_bad.json')), false);
+    assert.equal(fs.readdirSync(w).some((name) => name.startsWith('.sync-')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

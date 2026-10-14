@@ -42,6 +42,9 @@ const HISTORY_FILE = path.join(DATA_DIR, '.claude-usage-history.json');
 const USAGE_SNAPSHOT_FILE = path.join(DATA_DIR, '.claude-usage-latest.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
+const DESKTOP_SYNC_MS = 10 * 1000;
+const DESKTOP_AUTO_SYNC = process.platform === 'win32' && !MOCK && !ACCOUNTS_DIR && process.env.DESKTOP_AUTO_SYNC !== '0';
+let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, toWork: 0, toPersonal: 0 };
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
@@ -503,10 +506,17 @@ const server = http.createServer(async (req, res) => {
       try {
         shareLocalChats(expandHome(personal.configDir), expandHome(work.configDir));
         const profiles = findWindowsDesktopProfiles();
-        return sendJson(res, 200, syncDesktopSessionRecords(profiles.personal, profiles.work));
+        const result = syncDesktopSessionRecords(profiles.personal, profiles.work);
+        desktopSyncStatus = { ...desktopSyncStatus, lastRun: Date.now(), lastError: null,
+          toWork: desktopSyncStatus.toWork + result.toWork, toPersonal: desktopSyncStatus.toPersonal + result.toPersonal };
+        return sendJson(res, 200, result);
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
       }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/chats/sync-status') {
+      return sendJson(res, 200, desktopSyncStatus);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/code-setup/sync') {
@@ -579,3 +589,24 @@ server.listen(PORT, HOST, () => {
     } catch { /* opening the browser is optional */ }
   }
 });
+
+if (DESKTOP_AUTO_SYNC) {
+  const syncNewDesktopRecords = () => {
+    try {
+      const accounts = loadAccounts();
+      if (!accounts.some((account) => account.id === 'personal') || !accounts.some((account) => account.id === 'work')) return;
+      const profiles = findWindowsDesktopProfiles();
+      const result = syncDesktopSessionRecords(profiles.personal, profiles.work,
+        { minAgeMs: 2000, inspectConflicts: false });
+      desktopSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null,
+        toWork: desktopSyncStatus.toWork + result.toWork, toPersonal: desktopSyncStatus.toPersonal + result.toPersonal };
+      if (result.toWork || result.toPersonal) console.log(`Desktop chats: ${result.toWork} to Work, ${result.toPersonal} to Personal`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message !== desktopSyncStatus.lastError) console.warn(`Desktop chat sync: ${message}`);
+      desktopSyncStatus = { ...desktopSyncStatus, lastError: message };
+    }
+  };
+  setTimeout(syncNewDesktopRecords, 1000).unref();
+  setInterval(syncNewDesktopRecords, DESKTOP_SYNC_MS).unref();
+}

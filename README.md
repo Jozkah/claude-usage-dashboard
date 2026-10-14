@@ -72,7 +72,9 @@ On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude D
 
 Right-click Work account card, then choose **Share Personal CLI chats with Work**. Dashboard links Work's `projects` folder to Personal's local Claude Code transcripts. In Work Desktop Code, start a local session and type `/resume` to search and open a CLI chat.
 
-For local Desktop chats, choose **Sync local Desktop chats both ways** in the same menu. On Windows, this copies missing Desktop session records between Personal and Work profiles. Reopen Desktop to refresh Recents. Existing records are never overwritten; repeat sync after creating new chats in either profile. The full conversation was verified to load in Work after copying a Personal record. Account logins stay separate. Avoid editing the same session concurrently in both profiles. Cloud chats, account-specific connectors, and Customize plugins do not move with local session records.
+For local Desktop chats, choose **Sync local Desktop chats both ways** in the same menu. On Windows, the dashboard server also checks every 10 seconds and copies new, complete Desktop session records between Personal and Work profiles. Set `DESKTOP_AUTO_SYNC=0` to disable this. Existing records are never overwritten; the manual sync reports how many records differ. Claude Desktop may need to be reopened to refresh Recents because the dashboard cannot control its in-memory sidebar. The full conversation was verified to load in Work after copying a Personal record. Account logins stay separate. Avoid editing the same session concurrently in both profiles. Cloud chats, account-specific connectors, and Customize plugins do not move with local session records.
+
+Remote Control belongs to the signed-in Claude Code account. To connect every new Work session automatically, set `remoteControlAtStartup` to `true` in `~/.claude-work/settings.json`. Personal and Work create separate remote sessions; switching accounts does not transfer an active Remote Control connection.
 
 Crossing organizations can show a Claude Code notice about earlier thinking. [Anthropic binds some thinking blocks to the account that created them](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking); another account cannot reuse those blocks. Visible chat history still loads, but Claude must reason again from that history. The dashboard cannot make account-bound private thinking transferable. Run `/compact` after switching if you want Claude to summarize the visible history into a shorter working context; this may use tokens and does not recover old thinking.
 
@@ -93,6 +95,7 @@ This action needs dashboard running directly on same computer as Claude Code. It
 | `ALLOWED_HOSTS` | | Extra host names allowed, comma separated (to open it from another device) |
 | `ALLOW_ANY_HOST` | off | `1` accepts any host name. Only on a network you trust |
 | `NO_OPEN` | off | `1` stops it opening the browser on start |
+| `DESKTOP_AUTO_SYNC` | on for direct Windows installs | `0` disables automatic copying of new local Desktop session records |
 
 To open it from your phone on the same Wi-Fi: `HOST=0.0.0.0 ALLOWED_HOSTS=<your-pc-ip> npm start`.
 That lets anyone on your network see your usage percentages (never your logins).

@@ -42,9 +42,9 @@ export async function shareLocalChats(sourceId: string, targetId: string): Promi
 
 export async function syncDesktopChats(): Promise<string> {
   const res = await fetch('/api/chats/sync-desktop', { method: 'POST' });
-  const result = (await res.json()) as { error?: string; toWork?: number; toPersonal?: number };
+  const result = (await res.json()) as { error?: string; toWork?: number; toPersonal?: number; conflicts?: number };
   if (!res.ok) throw new Error(result.error || 'Could not sync Desktop sessions.');
-  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. Reopen Claude Desktop to refresh Recents. When continuing under another organization, Claude may drop earlier private thinking; conversation text remains.`;
+  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. ${result.conflicts ?? 0} differing records left untouched. New chats sync automatically while dashboard server runs. If Recents does not update, reopen Claude Desktop. Earlier private thinking cannot transfer between organizations.`;
 }
 
 export async function syncCodeSetup(): Promise<string> {

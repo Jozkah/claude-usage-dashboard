@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 function sessionLeaves(profile) {
   const root = path.join(profile, 'claude-code-sessions');
@@ -15,24 +16,48 @@ function sessionLeaves(profile) {
   return leaves[0];
 }
 
-export function syncDesktopSessionRecords(personalProfile, workProfile) {
+export function syncDesktopSessionRecords(personalProfile, workProfile, { minAgeMs = 0, inspectConflicts = true } = {}) {
   const personal = sessionLeaves(personalProfile);
   const work = sessionLeaves(workProfile);
   let toWork = 0;
   let toPersonal = 0;
+  let conflicts = 0;
   for (const [source, target, direction] of [[personal, work, 'work'], [work, personal, 'personal']]) {
     for (const file of fs.readdirSync(source)) {
       if (!/^local_[0-9a-f-]+\.json$/i.test(file)) continue;
+      const from = path.join(source, file);
+      const to = path.join(target, file);
+      if (fs.existsSync(to)) continue;
+      const before = fs.statSync(from);
+      if (minAgeMs > 0 && Date.now() - before.mtimeMs < minAgeMs) continue;
+      const temp = path.join(target, `.sync-${crypto.randomUUID()}.tmp`);
       try {
-        fs.copyFileSync(path.join(source, file), path.join(target, file), fs.constants.COPYFILE_EXCL);
+        fs.copyFileSync(from, temp, fs.constants.COPYFILE_EXCL);
+        const after = fs.statSync(from);
+        if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
+        JSON.parse(fs.readFileSync(temp, 'utf8'));
+        // Linking a complete temporary copy makes the destination visible atomically.
+        fs.linkSync(temp, to);
         if (direction === 'work') toWork++;
         else toPersonal++;
       } catch (error) {
-        if (error.code !== 'EEXIST') throw error;
+        if (error.code !== 'EEXIST' && !(error instanceof SyntaxError)) throw error;
+      } finally {
+        fs.rmSync(temp, { force: true });
       }
     }
   }
-  return { toWork, toPersonal };
+  if (inspectConflicts) {
+    for (const file of fs.readdirSync(personal)) {
+      if (!/^local_[0-9a-f-]+\.json$/i.test(file)) continue;
+      const workFile = path.join(work, file);
+      if (!fs.existsSync(workFile)) continue;
+      const personalHash = crypto.createHash('sha256').update(fs.readFileSync(path.join(personal, file))).digest('hex');
+      const workHash = crypto.createHash('sha256').update(fs.readFileSync(workFile)).digest('hex');
+      if (personalHash !== workHash) conflicts++;
+    }
+  }
+  return { toWork, toPersonal, conflicts };
 }
 
 export function findWindowsDesktopProfiles() {
