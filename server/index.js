@@ -21,6 +21,7 @@ import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js'
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopLabels } from './desktop-label-sync.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -517,6 +518,20 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/chats/sync-status') {
       return sendJson(res, 200, desktopSyncStatus);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/chats/sync-labels') {
+      if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop label sync requires a direct installation.' });
+      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      try {
+        const running = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          '@(Get-Process -Name Claude -ErrorAction SilentlyContinue).Count'], { encoding: 'utf8', timeout: 5000 }).trim());
+        if (!Number.isFinite(running) || running > 0) return sendJson(res, 409, { error: 'Fully quit both Claude Desktop instances, including tray icons, then retry.' });
+        const profiles = findWindowsDesktopProfiles();
+        return sendJson(res, 200, syncDesktopLabels(profiles.personal, profiles.work));
+      } catch (error) {
+        return sendJson(res, 409, { error: error.message });
+      }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/code-setup/sync') {

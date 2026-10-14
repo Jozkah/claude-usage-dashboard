@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { WifiOff } from 'lucide-react';
-import { removeAccount, shareLocalChats, syncCodeSetup, syncDesktopChats, useNow, useTheme, useUsage } from './lib/api';
+import { removeAccount, shareLocalChats, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useTheme, useUsage } from './lib/api';
 import type { Account, RangeKey } from './lib/types';
 import { Aurora } from './components/Aurora';
 import { Header } from './components/Header';
@@ -64,6 +64,12 @@ export default function App() {
   const syncDesktop = async () => {
     try { setChatShareMessage(await syncDesktopChats()); }
     catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync Desktop sessions.'); }
+    setContextAccount(null);
+  };
+
+  const syncLabels = async () => {
+    try { setChatShareMessage(await syncDesktopLabels()); }
+    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync Desktop names and groups.'); }
     setContextAccount(null);
   };
 
@@ -215,7 +221,7 @@ export default function App() {
           role="menu"
           aria-label={`${contextAccount.account.name} account actions`}
           className="fixed z-50 w-64 rounded-xl border border-line bg-card p-3 text-sm shadow-2xl"
-          style={{ left: Math.max(8, Math.min(contextAccount.x, window.innerWidth - 272)), top: Math.max(8, Math.min(contextAccount.y, window.innerHeight - 240)) }}
+          style={{ left: Math.max(8, Math.min(contextAccount.x, window.innerWidth - 272)), top: Math.max(8, Math.min(contextAccount.y, window.innerHeight - 290)) }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="font-medium">{contextAccount.account.name}</div>
@@ -229,6 +235,9 @@ export default function App() {
                 <>
                   <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncDesktop()}>
                     Sync local Desktop chats both ways
+                  </button>
+                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncLabels()}>
+                    Sync Desktop chat names and groups
                   </button>
                   <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncPlugins()}>
                     Copy local Code plugins and skills to Work

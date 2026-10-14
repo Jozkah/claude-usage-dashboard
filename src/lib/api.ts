@@ -47,6 +47,13 @@ export async function syncDesktopChats(): Promise<string> {
   return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. ${result.conflicts ?? 0} differing records left untouched. New chats sync automatically while dashboard server runs. If Recents does not update, reopen Claude Desktop. Earlier private thinking cannot transfer between organizations.`;
 }
 
+export async function syncDesktopLabels(): Promise<string> {
+  const res = await fetch('/api/chats/sync-labels', { method: 'POST' });
+  const result = (await res.json()) as { error?: string; titles?: number; groups?: number; assignments?: number };
+  if (!res.ok) throw new Error(result.error || 'Could not sync Desktop names and groups.');
+  return `Synced ${result.titles ?? 0} chat names, ${result.groups ?? 0} groups, ${result.assignments ?? 0} group assignments. Reopen both Claude Desktop profiles to refresh their sidebars.`;
+}
+
 export async function syncCodeSetup(): Promise<string> {
   const res = await fetch('/api/code-setup/sync', { method: 'POST' });
   const result = (await res.json()) as { error?: string; plugins?: number };
