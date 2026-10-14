@@ -31,3 +31,20 @@ test('copies missing Desktop records both ways and preserves existing records', 
     assert.equal(fs.readdirSync(w).some((name) => name.startsWith('.sync-')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('live imported Desktop session is not duplicated by background sync', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-import-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    const p = path.join(personal, 'claude-code-sessions', 'personal-account', 'device');
+    const w = path.join(work, 'claude-code-sessions', 'work-account', 'device');
+    fs.mkdirSync(p, { recursive: true });
+    fs.mkdirSync(w, { recursive: true });
+    fs.writeFileSync(path.join(w, 'local_original.json'), JSON.stringify({ cliSessionId: 'abc-123' }));
+    fs.writeFileSync(path.join(p, 'local_abc-123.json'), JSON.stringify({ cliSessionId: 'abc-123', adoptedFromOtherSurface: true }));
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 0 });
+    assert.deepEqual(fs.readdirSync(p), ['local_abc-123.json']);
+    assert.deepEqual(fs.readdirSync(w), ['local_original.json']);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

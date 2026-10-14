@@ -30,6 +30,17 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
       if (fs.existsSync(to)) continue;
       const before = fs.statSync(from);
       if (minAgeMs > 0 && Date.now() - before.mtimeMs < minAgeMs) continue;
+      let record;
+      try { record = JSON.parse(fs.readFileSync(from, 'utf8')); }
+      catch (error) {
+        if (error instanceof SyntaxError) continue;
+        throw error;
+      }
+      // Claude's live resume import creates a new pointer named after cliSessionId.
+      // Copying either pointer again would create duplicate sidebar entries.
+      if (record.adoptedFromOtherSurface ||
+          (typeof record.cliSessionId === 'string' && /^[0-9a-f-]+$/i.test(record.cliSessionId) &&
+           fs.existsSync(path.join(target, `local_${record.cliSessionId}.json`)))) continue;
       const temp = path.join(target, `.sync-${crypto.randomUUID()}.tmp`);
       try {
         fs.copyFileSync(from, temp, fs.constants.COPYFILE_EXCL);
