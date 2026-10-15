@@ -1,6 +1,83 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { ClassicLevel } from 'classic-level';
+
+// Chromium Local Storage encoding and pending-marker behavior follow the
+// MIT-licensed claude-desktop-session-sync project by RasmusKD.
+const ORIGIN = 'https://claude.ai';
+const prefix = Buffer.from(`_${ORIGIN}\0`, 'latin1');
+const decode = (bytes) => bytes[0] === 0 ? bytes.subarray(1).toString('utf16le') : bytes.subarray(1).toString('latin1');
+const encode = (value) => [...value].some((char) => char.charCodeAt(0) > 255)
+  ? Buffer.concat([Buffer.from([0]), Buffer.from(value, 'utf16le')])
+  : Buffer.concat([Buffer.from([1]), Buffer.from(value, 'latin1')]);
+const varint = (value) => {
+  const result = [];
+  let n = BigInt(value);
+  do { let byte = Number(n & 127n); n >>= 7n; if (n) byte |= 128; result.push(byte); } while (n);
+  return Buffer.from(result);
+};
+
+async function writeSidebarStore(profile, scope, groups, sections) {
+  const root = path.join(profile, 'Local Storage', 'leveldb');
+  const backup = `${root}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  fs.cpSync(root, backup, { recursive: true, errorOnExist: true, force: false });
+  const db = new ClassicLevel(root, { keyEncoding: 'buffer', valueEncoding: 'buffer', createIfMissing: false });
+  await db.open(); // refuses writes while Claude holds the LevelDB lock
+  try {
+    const entries = new Map();
+    let size = 0;
+    for await (const [key, value] of db.iterator({ gte: prefix, lt: Buffer.concat([prefix, Buffer.from([255])]) })) {
+      entries.set(decode(key.subarray(prefix.length)), { key, value });
+      size += key.length - prefix.length + value.length;
+    }
+    const storeRecord = entries.get('dframe-store');
+    const groupsRecord = entries.get('LSS-persisted.dframe-group-scopes');
+    const sectionsRecord = entries.get('LSS-persisted.dframe-code-sections');
+    const owner = entries.get('ccd-sync-owner');
+    const pending = entries.get('ccd-sync-pending:ccd/dframe-store');
+    if (!storeRecord || !groupsRecord || !sectionsRecord || !owner || decode(owner.value) !== scope.split('/')[0]) {
+      throw new Error('Work sidebar store does not match its account scope.');
+    }
+    if (pending && decode(pending.value) !== scope) throw new Error('Another account has an unsent sidebar change.');
+    const store = JSON.parse(decode(storeRecord.value));
+    const groupMirror = JSON.parse(decode(groupsRecord.value));
+    const sectionMirror = JSON.parse(decode(sectionsRecord.value));
+    if (!store.state?.customGroupsByScope || !store.state?.codeSidebarByScope ||
+        !groupMirror.value || !sectionMirror.value) throw new Error('Desktop sidebar storage schema changed.');
+    store.state.customGroupsByScope[scope] = groups;
+    store.state.codeSidebarByScope[scope] = { ...store.state.codeSidebarByScope[scope], sections };
+    groupMirror.value[scope] = groups;
+    groupMirror.timestamp = Date.now();
+    sectionMirror.value[scope] = { ...sectionMirror.value[scope], sections };
+    sectionMirror.timestamp = Date.now();
+
+    const ops = [];
+    let delta = 0;
+    for (const [record, value] of [
+      [storeRecord, store],
+      [groupsRecord, groupMirror],
+      [sectionsRecord, sectionMirror],
+    ]) {
+      const bytes = encode(JSON.stringify(value));
+      delta += bytes.length - record.value.length;
+      ops.push({ type: 'put', key: record.key, value: bytes });
+    }
+    if (!pending) {
+      const key = Buffer.concat([prefix, encode('ccd-sync-pending:ccd/dframe-store')]);
+      const value = encode(scope);
+      delta += key.length - prefix.length + value.length;
+      ops.push({ type: 'put', key, value });
+    }
+    const meta = Buffer.concat([
+      Buffer.from([8]), varint(BigInt(Date.now()) * 1000n + 11644473600000000n),
+      Buffer.from([16]), varint(BigInt(size + delta)),
+    ]);
+    ops.push({ type: 'put', key: Buffer.from(`META:${ORIGIN}`, 'latin1'), value: meta });
+    await db.batch(ops);
+    return backup;
+  } finally { await db.close(); }
+}
 
 function readProfile(profile) {
   const configPath = path.join(profile, 'claude_desktop_config.json');
@@ -41,7 +118,7 @@ function writeWithBackup(filename, value) {
   } finally { fs.rmSync(temp, { force: true }); }
 }
 
-export function syncDesktopLabels(personalProfile, workProfile) {
+export async function syncDesktopLabels(personalProfile, workProfile) {
   const personal = readProfile(personalProfile);
   const work = readProfile(workProfile);
   const profiles = [personal, work];
@@ -107,6 +184,7 @@ export function syncDesktopLabels(personalProfile, workProfile) {
   const changed = JSON.stringify(oldState) !== JSON.stringify(nextState) ||
     JSON.stringify(targetSections) !== JSON.stringify(nonManuals);
   if (changed) {
+    await writeSidebarStore(target === personal ? personalProfile : workProfile, target.scope, nextState, nonManuals);
     target.prefs['dframe-group-scopes'] ||= {};
     target.prefs['dframe-group-scopes'][target.scope] = nextState;
     target.prefs['dframe-code-sections'][target.scope].sections = nonManuals;

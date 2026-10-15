@@ -525,10 +525,11 @@ const server = http.createServer(async (req, res) => {
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
       try {
         const running = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-          '@(Get-Process -Name Claude -ErrorAction SilentlyContinue).Count'], { encoding: 'utf8', timeout: 5000 }).trim());
+          '@(Get-Process -Name Claude -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*\\WindowsApps\\Claude_*" }).Count'],
+        { encoding: 'utf8', timeout: 5000 }).trim());
         if (!Number.isFinite(running) || running > 0) return sendJson(res, 409, { error: 'Fully quit both Claude Desktop instances, including tray icons, then retry.' });
         const profiles = findWindowsDesktopProfiles();
-        return sendJson(res, 200, syncDesktopLabels(profiles.personal, profiles.work));
+        return sendJson(res, 200, await syncDesktopLabels(profiles.personal, profiles.work));
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
       }
