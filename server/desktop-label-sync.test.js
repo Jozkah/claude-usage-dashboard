@@ -13,7 +13,11 @@ test('copies sidebar groups and chat titles into corresponding profile scope', a
     const setup = (profile, scope, filename, title, groups) => {
       const leaf = path.join(profile, 'claude-code-sessions', scope, 'device');
       fs.mkdirSync(leaf, { recursive: true });
-      fs.writeFileSync(path.join(leaf, filename), JSON.stringify({ cliSessionId: 'abc-123', title }));
+      fs.writeFileSync(path.join(leaf, filename), JSON.stringify({
+        sessionId: 'shared-session',
+        cliSessionId: scope === 'personal-scope' ? 'personal-cli-session' : undefined,
+        title,
+      }));
       const group = { id: 'cg-1', name: 'Project' };
       const config = { preferences: { epitaxyPrefs: {
         'dframe-group-scopes': groups ? { [scope]: { groups: [group], assignments: { [`code:${filename.slice(0, -5)}`]: group.id }, order: { [group.id]: [`code:${filename.slice(0, -5)}`] } } } : {},

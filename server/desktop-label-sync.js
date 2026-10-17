@@ -100,8 +100,8 @@ function readProfile(profile) {
         let value;
         try { value = JSON.parse(fs.readFileSync(filename, 'utf8')); }
         catch (error) { if (error instanceof SyntaxError) continue; throw error; }
-        const id = value.cliSessionId || value.sessionId;
-        if (id) records.set(file.slice(0, -5), { filename, value, id, mtime: fs.statSync(filename).mtimeMs });
+        const ids = [...new Set([value.cliSessionId, value.sessionId].filter(Boolean))];
+        if (ids.length) records.set(file.slice(0, -5), { filename, value, ids, mtime: fs.statSync(filename).mtimeMs });
       }
     }
   }
@@ -126,12 +126,15 @@ export async function syncDesktopLabels(personalProfile, workProfile) {
   const byId = new Map();
   for (const profile of profiles) {
     for (const record of profile.records.values()) {
-      const peers = byId.get(record.id) || [];
-      peers.push(record);
-      byId.set(record.id, peers);
+      for (const id of record.ids) {
+        const peers = byId.get(id) || new Set();
+        peers.add(record);
+        byId.set(id, peers);
+      }
     }
   }
-  for (const peers of byId.values()) {
+  for (const peerSet of byId.values()) {
+    const peers = [...peerSet];
     if (peers.length !== 2) continue;
     const named = peers.filter((record) => typeof record.value.title === 'string' && record.value.title);
     if (!named.length) continue;
@@ -153,11 +156,14 @@ export async function syncDesktopLabels(personalProfile, workProfile) {
   const sourceState = source.prefs['dframe-group-scopes']?.[source.scope];
   if (!sourceState?.groups?.length) return { titles, groups: 0, assignments: 0 };
 
-  const targetById = new Map([...target.records].map(([key, record]) => [record.id, key]));
+  const targetById = new Map();
+  for (const [key, record] of target.records) {
+    for (const id of record.ids) targetById.set(id, key);
+  }
   const translate = (key) => {
     if (!key.startsWith('code:')) return key;
     const sourceRecord = source.records.get(key.slice(5));
-    const targetKey = sourceRecord && targetById.get(sourceRecord.id);
+    const targetKey = sourceRecord?.ids.map((id) => targetById.get(id)).find(Boolean);
     return targetKey ? `code:${targetKey}` : null;
   };
   const assignments = {};
