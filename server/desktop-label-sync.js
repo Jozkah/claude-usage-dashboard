@@ -108,6 +108,25 @@ function readProfile(profile) {
   return { configPath, config, prefs, scope, records };
 }
 
+export function desktopLabelSnapshot(profilePath) {
+  const profile = readProfile(profilePath);
+  const groups = profile.prefs['dframe-group-scopes']?.[profile.scope] || {};
+  const sections = profile.prefs['dframe-code-sections'][profile.scope].sections || [];
+  const sessionId = (key) => key.startsWith('code:')
+    ? `code:${profile.records.get(key.slice(5))?.value.sessionId || key.slice(5)}` : key;
+  const assignments = Object.entries(groups.assignments || {}).map(([key, group]) => [sessionId(key), group]).sort();
+  const order = Object.entries(groups.order || {}).map(([group, members]) =>
+    [group, members.map(sessionId)]).sort();
+  const manuals = sections.filter((section) => section.kind === 'manual').map((section) => ({
+    ...section, members: (section.members || []).map(sessionId),
+  }));
+  return { groups: groups.groups || [], assignments, order, manuals };
+}
+
+export function desktopLabelFingerprint(profilePath) {
+  return crypto.createHash('sha256').update(JSON.stringify(desktopLabelSnapshot(profilePath))).digest('hex');
+}
+
 function writeWithBackup(filename, value) {
   const backup = `${filename}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   fs.copyFileSync(filename, backup, fs.constants.COPYFILE_EXCL);
@@ -118,7 +137,7 @@ function writeWithBackup(filename, value) {
   } finally { fs.rmSync(temp, { force: true }); }
 }
 
-export async function syncDesktopLabels(personalProfile, workProfile) {
+export async function syncDesktopLabels(personalProfile, workProfile, options = {}) {
   const personal = readProfile(personalProfile);
   const work = readProfile(workProfile);
   const profiles = [personal, work];
@@ -151,10 +170,11 @@ export async function syncDesktopLabels(personalProfile, workProfile) {
     const state = profile.prefs['dframe-group-scopes']?.[profile.scope];
     return (state?.groups?.length || 0) + Object.keys(state?.assignments || {}).length;
   };
-  const source = groupCount(personal) >= groupCount(work) ? personal : work;
+  const source = options.source === 'personal' ? personal : options.source === 'work' ? work
+    : groupCount(personal) >= groupCount(work) ? personal : work;
   const target = source === personal ? work : personal;
   const sourceState = source.prefs['dframe-group-scopes']?.[source.scope];
-  if (!sourceState?.groups?.length) return { titles, groups: 0, assignments: 0 };
+  if (!sourceState?.groups) return { titles, groups: 0, assignments: 0 };
 
   const targetById = new Map();
   for (const [key, record] of target.records) {

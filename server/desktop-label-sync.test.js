@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClassicLevel } from 'classic-level';
-import { syncDesktopLabels } from './desktop-label-sync.js';
+import { syncDesktopLabels, desktopLabelFingerprint } from './desktop-label-sync.js';
 
 test('copies sidebar groups and chat titles into corresponding profile scope', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-sync-'));
@@ -59,6 +59,7 @@ test('copies sidebar groups and chat titles into corresponding profile scope', a
     assert.equal(store.state.codeSidebarByScope['work-scope'].sections[1].name, 'Project');
     assert.equal(await get('ccd-sync-pending:ccd/dframe-store'), 'work-scope');
     await saved.close();
+    assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(work));
     assert.deepEqual(await syncDesktopLabels(personal, work), { titles: 0, groups: 0, assignments: 0 });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
