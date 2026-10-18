@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches } from './desktop-chat-sync.js';
 
 test('copies missing Desktop records both ways and preserves existing records', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-sync-'));
@@ -66,7 +66,8 @@ test('repairs only clearly empty matching pointer after Desktop exits and keeps 
     const empty = { sessionId: id, lastActivityAt: 100, title: 'Full chat' };
     fs.writeFileSync(path.join(p, name), JSON.stringify(full));
     fs.writeFileSync(path.join(w, name), JSON.stringify(empty));
-    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 1);
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 0);
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work, { targetProfile: 'work' }), 1);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')), full);
     assert.equal(fs.readdirSync(w).filter((file) => file.startsWith(`${name}.backup-`)).length, 1);
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
@@ -95,5 +96,24 @@ test('repair uses branch currently checked out in copied worktree', () => {
     fs.writeFileSync(path.join(w, name), JSON.stringify({ sessionId: id, lastActivityAt: 100 }));
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')).branch, 'current-branch');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('closed profile updates stale branch with backup, then leaves it stable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-align-'));
+  try {
+    const repo = path.join(root, 'repo');
+    fs.mkdirSync(repo);
+    execFileSync('git', ['init', '-b', 'current-branch', repo], { stdio: 'ignore' });
+    const profile = path.join(root, 'work');
+    const leaf = path.join(profile, 'claude-code-sessions', 'account', 'device');
+    fs.mkdirSync(leaf, { recursive: true });
+    const file = path.join(leaf, 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b.json');
+    fs.writeFileSync(file, JSON.stringify({ cliSessionId: '26e615d1-a096-4913-ad43-707fa222f5eb',
+      completedTurns: 2, worktreePath: repo, branch: 'stale-branch' }));
+    assert.equal(alignDesktopSessionBranches(profile), 1);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).branch, 'current-branch');
+    assert.equal(alignDesktopSessionBranches(profile), 0);
+    assert.equal(fs.readdirSync(leaf).filter((name) => name.includes('.backup-branch-')).length, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

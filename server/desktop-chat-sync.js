@@ -74,7 +74,15 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
 
 // Call only after both Desktop profiles exit. Live Desktop workers can rewrite
 // these pointers from memory, including stale empty records.
-export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
+function checkedOutBranch(worktreePath) {
+  if (!worktreePath || !fs.existsSync(worktreePath)) return null;
+  try {
+    return execFileSync('git', ['-C', worktreePath, 'branch', '--show-current'],
+      { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch { return null; }
+}
+
+export function repairEmptyDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both' } = {}) {
   const personal = sessionLeaves(personalProfile);
   const work = sessionLeaves(workProfile);
   const pairs = [];
@@ -97,6 +105,7 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
       : complete(workRecord) && empty(personalRecord) ? workFile : null;
     if (!source) continue;
     const target = source === personalFile ? workFile : personalFile;
+    if (targetProfile !== 'both' && targetProfile !== (target === personalFile ? 'personal' : 'work')) continue;
     const sourceRecord = source === personalFile ? personalRecord : workRecord;
     const targetRecord = source === personalFile ? workRecord : personalRecord;
     if (Number(sourceRecord.lastActivityAt) <= Number(targetRecord.lastActivityAt)) continue;
@@ -107,15 +116,10 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
       const after = fs.statSync(source);
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
       const copied = JSON.parse(fs.readFileSync(temp, 'utf8'));
-      if (copied.worktreePath && fs.existsSync(copied.worktreePath)) {
-        try {
-          const checkedOut = execFileSync('git', ['-C', copied.worktreePath, 'branch', '--show-current'],
-            { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
-          if (checkedOut && copied.branch !== checkedOut) {
-            copied.branch = checkedOut;
-            fs.writeFileSync(temp, JSON.stringify(copied));
-          }
-        } catch { /* Keep source branch when Git cannot inspect worktree. */ }
+      const checkedOut = checkedOutBranch(copied.worktreePath);
+      if (checkedOut && copied.branch !== checkedOut) {
+        copied.branch = checkedOut;
+        fs.writeFileSync(temp, JSON.stringify(copied));
       }
       const backup = `${target}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
@@ -124,6 +128,33 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
     } finally { fs.rmSync(temp, { force: true }); }
   }
   return repaired;
+}
+
+// Call only while this profile is closed; Desktop otherwise rewrites records
+// from memory. A stale branch can make an otherwise valid chat fail to open.
+export function alignDesktopSessionBranches(profilePath) {
+  const leaf = sessionLeaves(profilePath);
+  let aligned = 0;
+  for (const name of fs.readdirSync(leaf)) {
+    if (!/^local_[0-9a-f-]+\.json$/i.test(name)) continue;
+    const file = path.join(leaf, name);
+    let record;
+    try { record = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+    if (!record.cliSessionId || !(Number(record.completedTurns) > 0)) continue;
+    const branch = checkedOutBranch(record.worktreePath);
+    if (!branch || !record.branch || branch === record.branch) continue;
+    const backup = `${file}.backup-branch-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+    const temp = `${file}.sync-${crypto.randomUUID()}.tmp`;
+    try {
+      record.branch = branch;
+      fs.writeFileSync(temp, JSON.stringify(record));
+      fs.renameSync(temp, file);
+      aligned++;
+    } finally { fs.rmSync(temp, { force: true }); }
+  }
+  return aligned;
 }
 
 export function findWindowsDesktopProfiles() {

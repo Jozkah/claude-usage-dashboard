@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
-import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords } from './desktop-chat-sync.js';
+import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches } from './desktop-chat-sync.js';
 import { syncDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
 import { chooseAutomaticLabelSource, chooseInitialLabelSource } from './desktop-auto-label-sync.js';
 import { syncCodeSetup } from './code-setup-sync.js';
@@ -47,16 +47,25 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
 const DESKTOP_SYNC_MS = 10 * 1000;
 const DESKTOP_AUTO_SYNC = process.platform === 'win32' && !MOCK && !ACCOUNTS_DIR && process.env.DESKTOP_AUTO_SYNC !== '0';
-let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, toWork: 0, toPersonal: 0, repaired: 0 };
+let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, toWork: 0, toPersonal: 0, repaired: 0, branchesAligned: 0 };
 let labelSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, waiting: false };
 let labelSyncBusy = false;
 
+function desktopProfileState() {
+  const counts = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "$items = @(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | Where-Object { $_.ExecutablePath -like \"*\\WindowsApps\\Claude_*\" }); " +
+    '$work = @($items | Where-Object { $_.CommandLine -like "*ClaudeProfiles\\Work*" }).Count; ' +
+    '$personal = @($items | Where-Object { $_.CommandLine -notlike "*ClaudeProfiles\\Work*" }).Count; ' +
+    '"$personal,$work"'], { encoding: 'utf8', timeout: 10000 }).trim().split(',').map(Number);
+  if (counts.length !== 2 || counts.some((count) => !Number.isInteger(count) || count < 0)) {
+    throw new Error('Could not check Claude Desktop processes.');
+  }
+  return { personal: counts[0] > 0, work: counts[1] > 0 };
+}
+
 function desktopRunning() {
-  const count = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    '@(Get-Process -Name Claude -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*\\WindowsApps\\Claude_*" }).Count'],
-  { encoding: 'utf8', timeout: 5000 }).trim());
-  if (!Number.isFinite(count)) throw new Error('Could not check Claude Desktop processes.');
-  return count > 0;
+  const state = desktopProfileState();
+  return state.personal || state.work;
 }
 
 function readLabelBaseline() {
@@ -661,11 +670,30 @@ if (DESKTOP_AUTO_SYNC) {
   setInterval(syncNewDesktopRecords, DESKTOP_SYNC_MS).unref();
 
   let closedChecks = 0;
+  const profileClosedChecks = { personal: 0, work: 0 };
+  const repairedDuringClosure = { personal: false, work: false };
   let syncedDuringClosure = false;
   const syncClosedDesktopLabels = async () => {
     if (labelSyncBusy) return;
     try {
-      if (desktopRunning()) {
+      const running = desktopProfileState();
+      for (const profile of ['personal', 'work']) {
+        if (running[profile]) {
+          profileClosedChecks[profile] = 0;
+          repairedDuringClosure[profile] = false;
+        } else profileClosedChecks[profile]++;
+      }
+      for (const profile of ['personal', 'work']) {
+        if (profileClosedChecks[profile] < 2 || repairedDuringClosure[profile]) continue;
+        const profiles = findWindowsDesktopProfiles();
+        const repaired = repairEmptyDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
+        const branchesAligned = alignDesktopSessionBranches(profiles[profile]);
+        desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired,
+          branchesAligned: desktopSyncStatus.branchesAligned + branchesAligned };
+        repairedDuringClosure[profile] = true;
+        if (repaired || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} chats, aligned ${branchesAligned} branches`);
+      }
+      if (running.personal || running.work) {
         closedChecks = 0;
         syncedDuringClosure = false;
         labelSyncStatus = { ...labelSyncStatus, waiting: true };
@@ -674,8 +702,6 @@ if (DESKTOP_AUTO_SYNC) {
       if (++closedChecks < 2 || syncedDuringClosure) return;
       labelSyncBusy = true;
       const profiles = findWindowsDesktopProfiles();
-      const repaired = repairEmptyDesktopSessionRecords(profiles.personal, profiles.work);
-      desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired };
       const current = labelFingerprints(profiles);
       const baseline = readLabelBaseline();
       const source = baseline ? chooseAutomaticLabelSource(current, baseline)
