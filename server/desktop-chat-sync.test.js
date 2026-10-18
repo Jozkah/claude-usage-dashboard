@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords } from './desktop-chat-sync.js';
 
 test('copies missing Desktop records both ways and preserves existing records', () => {
@@ -71,5 +72,28 @@ test('repairs only clearly empty matching pointer after Desktop exits and keeps 
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
     fs.writeFileSync(path.join(w, name), JSON.stringify({ ...empty, completedTurns: 1 }));
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('repair uses branch currently checked out in copied worktree', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-branch-'));
+  try {
+    const repo = path.join(root, 'repo');
+    fs.mkdirSync(repo);
+    execFileSync('git', ['init', '-b', 'current-branch', repo], { stdio: 'ignore' });
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    const p = path.join(personal, 'claude-code-sessions', 'personal-account', 'device');
+    const w = path.join(work, 'claude-code-sessions', 'work-account', 'device');
+    fs.mkdirSync(p, { recursive: true });
+    fs.mkdirSync(w, { recursive: true });
+    const name = 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b.json';
+    const id = 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b';
+    fs.writeFileSync(path.join(p, name), JSON.stringify({ sessionId: id,
+      cliSessionId: '26e615d1-a096-4913-ad43-707fa222f5eb', completedTurns: 2,
+      lastActivityAt: 200, worktreePath: repo, branch: 'stale-branch' }));
+    fs.writeFileSync(path.join(w, name), JSON.stringify({ sessionId: id, lastActivityAt: 100 }));
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')).branch, 'current-branch');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

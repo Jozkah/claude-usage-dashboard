@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 function sessionLeaves(profile) {
   const root = path.join(profile, 'claude-code-sessions');
@@ -105,7 +106,17 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
       fs.copyFileSync(source, temp, fs.constants.COPYFILE_EXCL);
       const after = fs.statSync(source);
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
-      JSON.parse(fs.readFileSync(temp, 'utf8'));
+      const copied = JSON.parse(fs.readFileSync(temp, 'utf8'));
+      if (copied.worktreePath && fs.existsSync(copied.worktreePath)) {
+        try {
+          const checkedOut = execFileSync('git', ['-C', copied.worktreePath, 'branch', '--show-current'],
+            { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
+          if (checkedOut && copied.branch !== checkedOut) {
+            copied.branch = checkedOut;
+            fs.writeFileSync(temp, JSON.stringify(copied));
+          }
+        } catch { /* Keep source branch when Git cannot inspect worktree. */ }
+      }
       const backup = `${target}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
       fs.renameSync(temp, target);
