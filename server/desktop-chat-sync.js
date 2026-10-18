@@ -71,6 +71,50 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
   return { toWork, toPersonal, conflicts };
 }
 
+// Call only after both Desktop profiles exit. Live Desktop workers can rewrite
+// these pointers from memory, including stale empty records.
+export function repairEmptyDesktopSessionRecords(personalProfile, workProfile) {
+  const personal = sessionLeaves(personalProfile);
+  const work = sessionLeaves(workProfile);
+  const pairs = [];
+  for (const file of fs.readdirSync(personal)) {
+    if (!/^local_[0-9a-f-]+\.json$/i.test(file) || !fs.existsSync(path.join(work, file))) continue;
+    pairs.push([path.join(personal, file), path.join(work, file)]);
+  }
+  let repaired = 0;
+  for (const [personalFile, workFile] of pairs) {
+    const records = [personalFile, workFile].map((file) => {
+      try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+      catch (error) { if (error instanceof SyntaxError) return null; throw error; }
+    });
+    const [personalRecord, workRecord] = records;
+    if (!personalRecord || !workRecord || personalRecord.sessionId !== workRecord.sessionId) continue;
+    const complete = (record) => typeof record.cliSessionId === 'string' &&
+      /^[0-9a-f-]{36}$/i.test(record.cliSessionId) && Number(record.completedTurns) > 0;
+    const empty = (record) => !record.cliSessionId && !(Number(record.completedTurns) > 0);
+    const source = complete(personalRecord) && empty(workRecord) ? personalFile
+      : complete(workRecord) && empty(personalRecord) ? workFile : null;
+    if (!source) continue;
+    const target = source === personalFile ? workFile : personalFile;
+    const sourceRecord = source === personalFile ? personalRecord : workRecord;
+    const targetRecord = source === personalFile ? workRecord : personalRecord;
+    if (Number(sourceRecord.lastActivityAt) <= Number(targetRecord.lastActivityAt)) continue;
+    const before = fs.statSync(source);
+    const temp = `${target}.sync-${crypto.randomUUID()}.tmp`;
+    try {
+      fs.copyFileSync(source, temp, fs.constants.COPYFILE_EXCL);
+      const after = fs.statSync(source);
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
+      JSON.parse(fs.readFileSync(temp, 'utf8'));
+      const backup = `${target}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
+      fs.renameSync(temp, target);
+      repaired++;
+    } finally { fs.rmSync(temp, { force: true }); }
+  }
+  return repaired;
+}
+
 export function findWindowsDesktopProfiles() {
   if (process.platform !== 'win32') throw new Error('Desktop session sync currently supports Windows.');
   const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');

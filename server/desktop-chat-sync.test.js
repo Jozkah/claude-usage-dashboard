@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { syncDesktopSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords } from './desktop-chat-sync.js';
 
 test('copies missing Desktop records both ways and preserves existing records', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-sync-'));
@@ -46,5 +46,30 @@ test('live imported Desktop session is not duplicated by background sync', () =>
     assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 0 });
     assert.deepEqual(fs.readdirSync(p), ['local_abc-123.json']);
     assert.deepEqual(fs.readdirSync(w), ['local_original.json']);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('repairs only clearly empty matching pointer after Desktop exits and keeps backup', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-repair-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    const p = path.join(personal, 'claude-code-sessions', 'personal-account', 'device');
+    const w = path.join(work, 'claude-code-sessions', 'work-account', 'device');
+    fs.mkdirSync(p, { recursive: true });
+    fs.mkdirSync(w, { recursive: true });
+    const name = 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b.json';
+    const id = 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b';
+    const full = { sessionId: id, cliSessionId: '26e615d1-a096-4913-ad43-707fa222f5eb',
+      completedTurns: 380, lastActivityAt: 200, title: 'Full chat' };
+    const empty = { sessionId: id, lastActivityAt: 100, title: 'Full chat' };
+    fs.writeFileSync(path.join(p, name), JSON.stringify(full));
+    fs.writeFileSync(path.join(w, name), JSON.stringify(empty));
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')), full);
+    assert.equal(fs.readdirSync(w).filter((file) => file.startsWith(`${name}.backup-`)).length, 1);
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
+    fs.writeFileSync(path.join(w, name), JSON.stringify({ ...empty, completedTurns: 1 }));
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
