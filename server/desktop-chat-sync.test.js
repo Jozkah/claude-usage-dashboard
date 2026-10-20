@@ -4,7 +4,43 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+
+test('closed Work profile follows Personal archive state and newer turns', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-work-reconcile-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    const p = path.join(personal, 'claude-code-sessions', 'account', 'device');
+    const w = path.join(work, 'claude-code-sessions', 'account', 'device');
+    fs.mkdirSync(p, { recursive: true });
+    fs.mkdirSync(w, { recursive: true });
+    const name = 'local_123abc.json';
+    fs.writeFileSync(path.join(p, name), JSON.stringify({ title: 'Same chat', isArchived: false,
+      completedTurns: 5, lastActivityAt: 500, lastAssistantUuid: 'latest' }));
+    fs.writeFileSync(path.join(w, name), JSON.stringify({ title: 'Same chat', isArchived: true,
+      completedTurns: 3, lastActivityAt: 300, workOnly: 'kept' }));
+    assert.equal(reconcileWorkSessionRecords(personal, work), 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')),
+      { title: 'Same chat', isArchived: false, completedTurns: 5, lastActivityAt: 500,
+        workOnly: 'kept', lastAssistantUuid: 'latest' });
+    assert.equal(reconcileWorkSessionRecords(personal, work), 0);
+    assert.equal(fs.readdirSync(w).filter((file) => file.includes('.backup-reconcile-')).length, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('discovers migrated Personal profile and existing Work profile', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-profile-paths-'));
+  try {
+    const root = path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache');
+    const personal = path.join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc');
+    const work = path.join(root, 'Local', 'ClaudeProfiles', 'Work');
+    fs.mkdirSync(path.join(root, 'Roaming', 'Claude', 'claude-code-sessions'), { recursive: true });
+    fs.mkdirSync(path.join(personal, 'claude-code-sessions'), { recursive: true });
+    fs.mkdirSync(path.join(work, 'claude-code-sessions'), { recursive: true });
+    assert.deepEqual(findWindowsDesktopProfiles(local), { personal, work });
+  } finally { fs.rmSync(local, { recursive: true, force: true }); }
+});
 
 test('copies missing Desktop records both ways and preserves existing records', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-sync-'));

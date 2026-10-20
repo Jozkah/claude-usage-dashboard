@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
-import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches } from './desktop-chat-sync.js';
+import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
 import { chooseAutomaticLabelSource, chooseInitialLabelSource } from './desktop-auto-label-sync.js';
 import { syncCodeSetup } from './code-setup-sync.js';
@@ -53,7 +53,7 @@ let labelSyncBusy = false;
 
 function desktopProfileState() {
   const counts = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    "$items = @(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | Where-Object { $_.ExecutablePath -like \"*\\WindowsApps\\Claude_*\" }); " +
+    "$items = @(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | Where-Object { $_.ExecutablePath -like \"*\\WindowsApps\\Claude_*\" -or $_.ExecutablePath -like \"*\\ClaudePortableWork\\*\" }); " +
     '$work = @($items | Where-Object { $_.CommandLine -like "*ClaudeProfiles\\Work*" }).Count; ' +
     '$personal = @($items | Where-Object { $_.CommandLine -notlike "*ClaudeProfiles\\Work*" }).Count; ' +
     '"$personal,$work"'], { encoding: 'utf8', timeout: 10000 }).trim().split(',').map(Number);
@@ -687,11 +687,12 @@ if (DESKTOP_AUTO_SYNC) {
         if (profileClosedChecks[profile] < 2 || repairedDuringClosure[profile]) continue;
         const profiles = findWindowsDesktopProfiles();
         const repaired = repairEmptyDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
+        const reconciled = profile === 'work' ? reconcileWorkSessionRecords(profiles.personal, profiles.work) : 0;
         const branchesAligned = alignDesktopSessionBranches(profiles[profile]);
         desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired,
           branchesAligned: desktopSyncStatus.branchesAligned + branchesAligned };
         repairedDuringClosure[profile] = true;
-        if (repaired || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} chats, aligned ${branchesAligned} branches`);
+        if (repaired || reconciled || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} chats, reconciled ${reconciled} chats, aligned ${branchesAligned} branches`);
       }
       if (running.personal || running.work) {
         closedChecks = 0;

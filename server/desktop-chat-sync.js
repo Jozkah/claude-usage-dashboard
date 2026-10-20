@@ -157,15 +157,63 @@ export function alignDesktopSessionBranches(profilePath) {
   return aligned;
 }
 
-export function findWindowsDesktopProfiles() {
+// Run only while Work Desktop is closed. Its in-memory session index otherwise
+// overwrites edited pointers. Personal's archive state controls shared visibility.
+export function reconcileWorkSessionRecords(personalProfile, workProfile) {
+  const personal = sessionLeaves(personalProfile);
+  const work = sessionLeaves(workProfile);
+  let updated = 0;
+  for (const name of fs.readdirSync(personal)) {
+    if (!/^local_[0-9a-f-]+\.json$/i.test(name)) continue;
+    const source = path.join(personal, name);
+    const target = path.join(work, name);
+    if (!fs.existsSync(target)) continue;
+    let personalRecord, workRecord;
+    try {
+      personalRecord = JSON.parse(fs.readFileSync(source, 'utf8'));
+      workRecord = JSON.parse(fs.readFileSync(target, 'utf8'));
+    } catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+    const merged = { ...workRecord };
+    if (typeof personalRecord.isArchived === 'boolean') merged.isArchived = personalRecord.isArchived;
+    const personalTurns = Number(personalRecord.completedTurns) || 0;
+    const workTurns = Number(workRecord.completedTurns) || 0;
+    if (personalTurns > workTurns || (personalTurns === workTurns &&
+        Number(personalRecord.lastActivityAt) > Number(workRecord.lastActivityAt))) {
+      for (const field of ['completedTurns', 'lastActivityAt', 'lastAssistantUuid',
+        'postTurnSummary', 'postTurnSummaryFor', 'latestUserFrameAt']) {
+        if (field in personalRecord) merged[field] = personalRecord[field];
+      }
+    }
+    if (JSON.stringify(merged) === JSON.stringify(workRecord)) continue;
+    const before = fs.statSync(source);
+    const temp = `${target}.sync-${crypto.randomUUID()}.tmp`;
+    try {
+      const after = fs.statSync(source);
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
+      fs.writeFileSync(temp, JSON.stringify(merged));
+      fs.copyFileSync(target, `${target}.backup-reconcile-${new Date().toISOString().replace(/[:.]/g, '-')}`, fs.constants.COPYFILE_EXCL);
+      fs.renameSync(temp, target);
+      updated++;
+    } finally { fs.rmSync(temp, { force: true }); }
+  }
+  return updated;
+}
+
+export function findWindowsDesktopProfiles(local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) {
   if (process.platform !== 'win32') throw new Error('Desktop session sync currently supports Windows.');
-  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
   const packages = path.join(local, 'Packages');
   for (const entry of fs.readdirSync(packages, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^Claude_/.test(entry.name)) continue;
     const root = path.join(packages, entry.name, 'LocalCache');
-    const personal = path.join(root, 'Roaming', 'Claude');
-    const work = path.join(root, 'Local', 'ClaudeProfiles', 'Work');
+    const publisher = entry.name.slice(entry.name.lastIndexOf('_') + 1).toLowerCase();
+    const migratedPersonal = path.join(local, 'Claude-Data', `claude_${publisher}`);
+    const legacyPersonal = path.join(root, 'Roaming', 'Claude');
+    const personal = fs.existsSync(path.join(migratedPersonal, 'claude-code-sessions'))
+      ? migratedPersonal : legacyPersonal;
+    const legacyWork = path.join(root, 'Local', 'ClaudeProfiles', 'Work');
+    const currentWork = path.join(local, 'ClaudeProfiles', 'Work');
+    const work = fs.existsSync(path.join(legacyWork, 'claude-code-sessions'))
+      ? legacyWork : currentWork;
     if (fs.existsSync(path.join(personal, 'claude-code-sessions')) && fs.existsSync(path.join(work, 'claude-code-sessions'))) {
       return { personal, work };
     }
