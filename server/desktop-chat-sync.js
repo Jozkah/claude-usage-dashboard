@@ -130,6 +130,56 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile, {
   return repaired;
 }
 
+// Call only while target Desktop profile is closed. A pointer with fewer turns
+// can keep showing an incomplete transcript even when both profiles share JSONL.
+export function repairStaleDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both' } = {}) {
+  const personal = sessionLeaves(personalProfile);
+  const work = sessionLeaves(workProfile);
+  let repaired = 0;
+  for (const name of fs.readdirSync(personal)) {
+    if (!/^local_[0-9a-f-]+\.json$/i.test(name)) continue;
+    const personalFile = path.join(personal, name);
+    const workFile = path.join(work, name);
+    if (!fs.existsSync(workFile)) continue;
+    let personalRecord, workRecord;
+    try {
+      personalRecord = JSON.parse(fs.readFileSync(personalFile, 'utf8'));
+      workRecord = JSON.parse(fs.readFileSync(workFile, 'utf8'));
+    } catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+    if (!personalRecord.sessionId || personalRecord.sessionId !== workRecord.sessionId) continue;
+    for (const [source, target, sourceRecord, targetRecord, targetName] of [
+      [personalFile, workFile, personalRecord, workRecord, 'work'],
+      [workFile, personalFile, workRecord, personalRecord, 'personal'],
+    ]) {
+      if (targetProfile !== 'both' && targetProfile !== targetName) continue;
+      const sourceTurns = Number(sourceRecord.completedTurns) || 0;
+      const targetTurns = Number(targetRecord.completedTurns) || 0;
+      if (sourceTurns <= targetTurns || sourceTurns <= 0 ||
+          Number(sourceRecord.lastActivityAt) <= Number(targetRecord.lastActivityAt) ||
+          !/^[0-9a-f-]{36}$/i.test(sourceRecord.cliSessionId || '')) continue;
+      if (targetTurns > 0 && sourceRecord.cliSessionId !== targetRecord.cliSessionId) continue;
+      const before = fs.statSync(source);
+      const temp = `${target}.sync-${crypto.randomUUID()}.tmp`;
+      try {
+        fs.copyFileSync(source, temp, fs.constants.COPYFILE_EXCL);
+        const after = fs.statSync(source);
+        if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) continue;
+        const copied = JSON.parse(fs.readFileSync(temp, 'utf8'));
+        const branch = checkedOutBranch(copied.worktreePath);
+        if (branch && copied.branch !== branch) {
+          copied.branch = branch;
+          fs.writeFileSync(temp, JSON.stringify(copied));
+        }
+        const backup = `${target}.backup-stale-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
+        fs.renameSync(temp, target);
+        repaired++;
+      } finally { fs.rmSync(temp, { force: true }); }
+    }
+  }
+  return repaired;
+}
+
 // Call only while this profile is closed; Desktop otherwise rewrites records
 // from memory. A stale branch can make an otherwise valid chat fail to open.
 export function alignDesktopSessionBranches(profilePath) {

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
-import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
 import { chooseAutomaticLabelSource, chooseInitialLabelSource } from './desktop-auto-label-sync.js';
 import { syncCodeSetup } from './code-setup-sync.js';
@@ -687,12 +687,13 @@ if (DESKTOP_AUTO_SYNC) {
         if (profileClosedChecks[profile] < 2 || repairedDuringClosure[profile]) continue;
         const profiles = findWindowsDesktopProfiles();
         const repaired = repairEmptyDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
+        const staleRepaired = repairStaleDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
         const reconciled = profile === 'work' ? reconcileWorkSessionRecords(profiles.personal, profiles.work) : 0;
         const branchesAligned = alignDesktopSessionBranches(profiles[profile]);
-        desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired,
+        desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired + staleRepaired,
           branchesAligned: desktopSyncStatus.branchesAligned + branchesAligned };
         repairedDuringClosure[profile] = true;
-        if (repaired || reconciled || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} chats, reconciled ${reconciled} chats, aligned ${branchesAligned} branches`);
+        if (repaired || staleRepaired || reconciled || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} empty chats, ${staleRepaired} stale chats, reconciled ${reconciled} chats, aligned ${branchesAligned} branches`);
       }
       if (running.personal || running.work) {
         closedChecks = 0;

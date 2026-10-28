@@ -4,7 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+
+test('repairs newer full transcript pointer into closed Personal profile without losing backup', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-stale-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    const p = path.join(personal, 'claude-code-sessions', 'account', 'device');
+    const w = path.join(work, 'claude-code-sessions', 'account', 'device');
+    fs.mkdirSync(p, { recursive: true });
+    fs.mkdirSync(w, { recursive: true });
+    const name = 'local_bbaebc38-b69e-41f0-9a7a-68a45133298d.json';
+    const sessionId = name.slice(0, -5);
+    const older = { sessionId, cliSessionId: 'f06a3779-e1f5-4b3d-bb34-7dd745e0e247',
+      title: 'Bot HZ.exe security testing', completedTurns: 0, lastActivityAt: 100 };
+    const newer = { sessionId, cliSessionId: '5603d0eb-a1d3-4483-8108-a10b1afd7fbf',
+      title: older.title, completedTurns: 85, lastActivityAt: 200 };
+    fs.writeFileSync(path.join(p, name), JSON.stringify(older));
+    fs.writeFileSync(path.join(w, name), JSON.stringify(newer));
+    assert.equal(repairStaleDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(p, name), 'utf8')), newer);
+    assert.equal(repairStaleDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 0);
+    assert.equal(fs.readdirSync(p).filter((file) => file.startsWith(`${name}.backup-stale-`)).length, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('closed Work profile follows Personal archive state and newer turns', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-work-reconcile-'));
