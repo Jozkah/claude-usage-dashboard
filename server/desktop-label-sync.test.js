@@ -4,7 +4,60 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClassicLevel } from 'classic-level';
-import { syncDesktopLabels, desktopLabelFingerprint } from './desktop-label-sync.js';
+import { syncDesktopLabels, syncMergedDesktopLabels, desktopLabelFingerprint } from './desktop-label-sync.js';
+
+test('merges independent Desktop categories into both closed profiles', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-merge-'));
+  try {
+    const prefix = Buffer.from('_https://claude.ai\0', 'latin1');
+    const setup = async (name, groups, assignments) => {
+      const profile = path.join(root, name);
+      const scope = `${name}-scope`;
+      const leaf = path.join(profile, 'claude-code-sessions', scope, 'device');
+      fs.mkdirSync(leaf, { recursive: true });
+      for (const id of ['a', 'b', 'c']) fs.writeFileSync(path.join(leaf, `local_${id}.json`),
+        JSON.stringify({ sessionId: `local_${id}`, title: id }));
+      const state = { groups, assignments, order: {} };
+      const sections = [{ id: 'pinned', kind: 'pinned', order: 0 },
+        ...groups.map((group, index) => ({ id: group.id, kind: 'manual', name: group.name,
+          order: index + 1, members: [] })),
+        { id: 'sessions', kind: 'sessions', order: groups.length + 1 }];
+      fs.writeFileSync(path.join(profile, 'claude_desktop_config.json'), JSON.stringify({ preferences: {
+        epitaxyPrefs: { 'dframe-group-scopes': { [scope]: state },
+          'dframe-code-sections': { [scope]: { sections } } } } }));
+      const db = new ClassicLevel(path.join(profile, 'Local Storage', 'leveldb'),
+        { keyEncoding: 'buffer', valueEncoding: 'buffer' });
+      await db.open();
+      const put = (key, value) => db.put(Buffer.concat([prefix, Buffer.from([1, ...Buffer.from(key)])]),
+        Buffer.concat([Buffer.from([1]), Buffer.from(typeof value === 'string' ? value : JSON.stringify(value))]));
+      await put('ccd-sync-owner', scope);
+      await put('dframe-store', { version: 1, state: { customGroupsByScope: { [scope]: state },
+        codeSidebarByScope: { [scope]: { sections } } } });
+      await put('LSS-persisted.dframe-group-scopes', { value: { [scope]: state }, timestamp: 0 });
+      await put('LSS-persisted.dframe-code-sections', { value: { [scope]: { sections } }, timestamp: 0 });
+      await db.close();
+      return profile;
+    };
+    const personal = await setup('personal', [{ id: 'trip-p', name: 'viagens' }],
+      { 'code:local_a': 'trip-p' });
+    const work = await setup('work', [{ id: 'trip-w', name: 'viagens' }, { id: 'gaming', name: 'gaming' }],
+      { 'code:local_b': 'trip-w', 'code:local_c': 'gaming' });
+    await syncMergedDesktopLabels(personal, work, { targetProfile: 'work' });
+    const personalBefore = JSON.parse(fs.readFileSync(path.join(personal, 'claude_desktop_config.json')));
+    assert.deepEqual(personalBefore.preferences.epitaxyPrefs['dframe-group-scopes']['personal-scope'].groups
+      .map((group) => group.name), ['viagens']);
+    await syncMergedDesktopLabels(personal, work);
+    for (const profile of [personal, work]) {
+      const config = JSON.parse(fs.readFileSync(path.join(profile, 'claude_desktop_config.json')));
+      const scope = path.basename(profile) + '-scope';
+      const state = config.preferences.epitaxyPrefs['dframe-group-scopes'][scope];
+      assert.deepEqual(state.groups.map((group) => group.name), ['viagens', 'gaming']);
+      assert.deepEqual(state.assignments, { 'code:local_a': 'trip-p',
+        'code:local_b': 'trip-p', 'code:local_c': 'gaming' });
+    }
+    assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(work));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('copies sidebar groups and chat titles into corresponding profile scope', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-sync-'));

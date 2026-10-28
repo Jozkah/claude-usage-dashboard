@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ClassicLevel } from 'classic-level';
+import { mergeDesktopLabelSnapshots } from './desktop-auto-label-sync.js';
 
 // Chromium Local Storage encoding and pending-marker behavior follow the
 // MIT-licensed claude-desktop-session-sync project by RasmusKD.
@@ -137,10 +138,7 @@ function writeWithBackup(filename, value) {
   } finally { fs.rmSync(temp, { force: true }); }
 }
 
-export async function syncDesktopLabels(personalProfile, workProfile, options = {}) {
-  const personal = readProfile(personalProfile);
-  const work = readProfile(workProfile);
-  const profiles = [personal, work];
+function syncDesktopTitles(profiles) {
   let titles = 0;
   const byId = new Map();
   for (const profile of profiles) {
@@ -165,6 +163,13 @@ export async function syncDesktopLabels(personalProfile, workProfile, options = 
       titles++;
     }
   }
+  return titles;
+}
+
+export async function syncDesktopLabels(personalProfile, workProfile, options = {}) {
+  const personal = readProfile(personalProfile);
+  const work = readProfile(workProfile);
+  const titles = syncDesktopTitles([personal, work]);
 
   const groupCount = (profile) => {
     const state = profile.prefs['dframe-group-scopes']?.[profile.scope];
@@ -217,4 +222,52 @@ export async function syncDesktopLabels(personalProfile, workProfile, options = 
     writeWithBackup(target.configPath, target.config);
   }
   return { titles, groups: changed ? groups.length : 0, assignments: changed ? Object.keys(assignments).length : 0 };
+}
+
+export async function syncMergedDesktopLabels(personalProfile, workProfile, { targetProfile = 'both' } = {}) {
+  if (!['personal', 'work', 'both'].includes(targetProfile)) throw new Error(`Invalid target profile: ${targetProfile}`);
+  const merged = mergeDesktopLabelSnapshots(
+    desktopLabelSnapshot(personalProfile), desktopLabelSnapshot(workProfile));
+  const titles = targetProfile === 'both'
+    ? syncDesktopTitles([readProfile(personalProfile), readProfile(workProfile)]) : 0;
+  let updated = 0;
+  const targets = targetProfile === 'both' ? [personalProfile, workProfile]
+    : [targetProfile === 'personal' ? personalProfile : workProfile];
+  for (const profilePath of targets) {
+    const profile = readProfile(profilePath);
+    const bySessionId = new Map();
+    for (const [key, record] of profile.records) bySessionId.set(record.value.sessionId, key);
+    const translate = (key) => {
+      if (!key.startsWith('code:')) return key;
+      const target = bySessionId.get(key.slice(5));
+      return target ? `code:${target}` : null;
+    };
+    const assignments = {};
+    for (const [key, groupId] of merged.assignments) {
+      const local = translate(key);
+      if (local) assignments[local] = groupId;
+    }
+    const order = {};
+    for (const [groupId, members] of merged.order) {
+      order[groupId] = [...new Set(members.map(translate).filter(Boolean))];
+    }
+    const oldState = profile.prefs['dframe-group-scopes']?.[profile.scope];
+    const oldSections = profile.prefs['dframe-code-sections'][profile.scope].sections;
+    const nonManuals = oldSections.filter((section) => section.kind !== 'manual').map((section) => structuredClone(section));
+    const manuals = merged.manuals.map((section) => ({ ...structuredClone(section),
+      members: [...new Set((section.members || []).map(translate).filter(Boolean))] }));
+    const sessionsIndex = nonManuals.findIndex((section) => section.kind === 'sessions');
+    nonManuals.splice(sessionsIndex < 0 ? nonManuals.length : sessionsIndex, 0, ...manuals);
+    nonManuals.forEach((section, index) => { section.order = index; });
+    const nextState = { ...oldState, groups: structuredClone(merged.groups), assignments, order };
+    if (JSON.stringify(oldState) === JSON.stringify(nextState) &&
+        JSON.stringify(oldSections) === JSON.stringify(nonManuals)) continue;
+    await writeSidebarStore(profilePath, profile.scope, nextState, nonManuals);
+    profile.prefs['dframe-group-scopes'] ||= {};
+    profile.prefs['dframe-group-scopes'][profile.scope] = nextState;
+    profile.prefs['dframe-code-sections'][profile.scope].sections = nonManuals;
+    writeWithBackup(profile.configPath, profile.config);
+    updated++;
+  }
+  return { titles, groups: merged.groups.length, assignments: merged.assignments.length, updated };
 }

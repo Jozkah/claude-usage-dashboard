@@ -21,7 +21,7 @@ import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js'
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
-import { syncDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
+import { syncDesktopLabels, syncMergedDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
 import { chooseAutomaticLabelSource, chooseInitialLabelSource } from './desktop-auto-label-sync.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 
@@ -672,6 +672,7 @@ if (DESKTOP_AUTO_SYNC) {
   let closedChecks = 0;
   const profileClosedChecks = { personal: 0, work: 0 };
   const repairedDuringClosure = { personal: false, work: false };
+  const labelsSyncedDuringClosure = { personal: false, work: false };
   let syncedDuringClosure = false;
   const syncClosedDesktopLabels = async () => {
     if (labelSyncBusy) return;
@@ -681,6 +682,7 @@ if (DESKTOP_AUTO_SYNC) {
         if (running[profile]) {
           profileClosedChecks[profile] = 0;
           repairedDuringClosure[profile] = false;
+          labelsSyncedDuringClosure[profile] = false;
         } else profileClosedChecks[profile]++;
       }
       for (const profile of ['personal', 'work']) {
@@ -695,10 +697,21 @@ if (DESKTOP_AUTO_SYNC) {
         repairedDuringClosure[profile] = true;
         if (repaired || staleRepaired || reconciled || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} empty chats, ${staleRepaired} stale chats, reconciled ${reconciled} chats, aligned ${branchesAligned} branches`);
       }
+      if (running.personal !== running.work) {
+        const targetProfile = running.personal ? 'work' : 'personal';
+        if (profileClosedChecks[targetProfile] >= 2 && !labelsSyncedDuringClosure[targetProfile]) {
+          labelSyncBusy = true;
+          const profiles = findWindowsDesktopProfiles();
+          const result = await syncMergedDesktopLabels(profiles.personal, profiles.work, { targetProfile });
+          labelsSyncedDuringClosure[targetProfile] = true;
+          labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
+          if (result.updated) console.log(`Desktop ${targetProfile}: synced ${result.groups} groups, ${result.assignments} assignments`);
+        }
+      }
       if (running.personal || running.work) {
         closedChecks = 0;
         syncedDuringClosure = false;
-        labelSyncStatus = { ...labelSyncStatus, waiting: true };
+        labelSyncStatus = { ...labelSyncStatus, waiting: !labelsSyncedDuringClosure[running.personal ? 'work' : 'personal'] };
         return;
       }
       if (++closedChecks < 2 || syncedDuringClosure) return;
@@ -708,8 +721,9 @@ if (DESKTOP_AUTO_SYNC) {
       const baseline = readLabelBaseline();
       const source = baseline ? chooseAutomaticLabelSource(current, baseline)
         : chooseInitialLabelSource(desktopLabelSnapshot(profiles.personal), desktopLabelSnapshot(profiles.work));
-      if (!source) throw new Error('Both Desktop profiles have different group changes. Use manual group sync after reviewing them.');
-      const result = await syncDesktopLabels(profiles.personal, profiles.work, { source });
+      const result = source
+        ? await syncDesktopLabels(profiles.personal, profiles.work, { source })
+        : await syncMergedDesktopLabels(profiles.personal, profiles.work);
       saveLabelBaseline(profiles);
       labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
       syncedDuringClosure = true;
