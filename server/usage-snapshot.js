@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { visibleUsageWindows } from './plan-limits.js';
 
 export function createUsageSnapshot(file) {
   let saved = {};
@@ -20,7 +21,7 @@ export function createUsageSnapshot(file) {
       const last = saved[account.id];
       if (!last || last.configDir !== account.configDir || !Array.isArray(last.windows) || !last.windows.length) return null;
       return { id: account.id, name: account.name, configDir: account.configDir,
-        fetchedAt: last.fetchedAt, plan: last.plan, windows: last.windows,
+        fetchedAt: last.fetchedAt, plan: last.plan, windows: visibleUsageWindows(last.plan, last.windows),
         status: 'ok', stale: true, staleMessage: 'Waiting until reset approaches.' };
     },
     remember(account, value) {
@@ -55,7 +56,7 @@ export function createUsageSnapshot(file) {
         ...failed,
         plan: last.plan,
         fetchedAt: last.fetchedAt,
-        windows: last.windows,
+        windows: visibleUsageWindows(last.plan, last.windows),
         status: 'ok',
         stale: true,
         authStatus: failed.status,

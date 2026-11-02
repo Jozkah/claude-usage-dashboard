@@ -25,6 +25,7 @@ export interface Account {
   plan?: string | null;
   status: AccountStatus;
   authStatus?: AccountStatus;
+  retryAt?: number;
   message?: string;
   windows?: UsageWindow[];
   sessions?: ChatSession[];

@@ -17,20 +17,23 @@ interface Props {
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
-function Gauge({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
+function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?: boolean; retryAt?: number }) {
   const pace = paceFor(w, now);
   const reset = nextReset(w, now, stale);
   const countdown = reset ? fmtDur(reset.at - now) : null;
+  const previousCycle = stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now;
   return (
     <div className="rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
-      <Ring used={w.used} elapsed={elapsedFraction(w, now)} />
+      {previousCycle ? <div className="grid h-[132px] place-items-center text-xs text-muted-fg">Current usage pending</div>
+        : <Ring used={w.used} elapsed={elapsedFraction(w, now)} />}
       <div className="mt-3 text-[12.5px] text-muted-fg">
         {countdown ? (
           <>
             {reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums">{countdown}</b>
           </>
-        ) : stale ? 'Reset time unavailable' : w.resetsAt ? 'Awaiting updated reset' : 'Reset time unknown'}
+        ) : stale && retryAt && retryAt > now ? `Next usage check in ${fmtDur(retryAt - now)}`
+          : stale ? 'Reset needs fresh reading' : w.resetsAt ? 'Awaiting updated reset' : 'Reset time unknown'}
       </div>
       {reset && <div className="text-[11.5px] text-subtle-fg">{fmtClock(reset.at)}</div>}
       <div className="mt-2 h-5">{pace && <Chip tone={pace.tone}>{pace.label}</Chip>}</div>
@@ -156,7 +159,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
     >
       <div className="p-3">
         <div className="grid grid-cols-2 gap-3">
-          {main.map((w) => <Gauge key={w.key} w={w} now={now} stale={a.stale} />)}
+          {main.map((w) => <Gauge key={w.key} w={w} now={now} stale={a.stale} retryAt={a.retryAt} />)}
         </div>
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} stale={a.stale} />)}</div>

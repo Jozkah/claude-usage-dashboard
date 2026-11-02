@@ -12,7 +12,10 @@ test('persists last successful usage without credentials and restores it after r
     const account = { id: 'work', name: 'Work', configDir: '~/.claude-work' };
     const success = {
       ...account, status: 'ok', fetchedAt: 1234, plan: 'Max 5x',
-      windows: [{ key: 'five_hour', label: '5-hour session', used: 42, resetsAt: '2026-10-12T15:00:00Z' }],
+      windows: [
+        { key: 'five_hour', label: '5-hour session', used: 42, resetsAt: '2026-10-12T15:00:00Z' },
+        { key: 'seven_day', label: 'Weekly · all models', used: 100, resetsAt: '2026-10-14T07:00:00Z' },
+      ],
       raw: { secret: 'must not persist' },
     };
     createUsageSnapshot(file).remember(account, success);
@@ -25,7 +28,8 @@ test('persists last successful usage without credentials and restores it after r
     assert.equal(stale.status, 'ok');
     assert.equal(stale.stale, true);
     assert.equal(stale.fetchedAt, 1234);
-    assert.equal(stale.windows[0].used, 42);
+    assert.deepEqual(stale.windows.map((window) => window.key), ['seven_day']);
+    assert.deepEqual(snapshots.peek(account).windows.map((window) => window.key), ['seven_day']);
     assert.match(stale.staleMessage, /No login found/);
     assert.equal(snapshots.fallback({ ...account, configDir: '~/.other' }, { status: 'error' }).status, 'error');
   } finally {
