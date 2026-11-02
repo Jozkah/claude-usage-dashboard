@@ -230,7 +230,7 @@ async function fetchStatus(acc) {
   const base = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now() };
   const creds = readCredentials(expandHome(acc.configDir));
   if (!creds || !creds.accessToken) {
-    return { ...base, status: 'no_login', message: 'No Claude login found in this folder. Start Claude Code with this config folder and log in once.' };
+    return { ...base, status: 'no_login', message: 'No Claude Code login found in this config folder. Claude Desktop can be signed in separately.' };
   }
   const plan = planLabel(creds);
   try {

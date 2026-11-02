@@ -113,7 +113,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }:
         <div className="flex gap-3 p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/12 text-warn"><Icon className="size-4" /></div>
           <div className="min-w-0">
-            <div className="text-sm font-medium">{a.status === 'no_login' ? 'Not logged in' : a.status === 'expired' ? 'Login expired' : 'Can’t read usage'}</div>
+            <div className="text-sm font-medium">{a.status === 'no_login' ? 'CLI usage login missing' : a.status === 'expired' ? 'Login expired' : 'Can’t read usage'}</div>
             <p className="mt-0.5 text-[13px] text-muted-fg">{a.message}</p>
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>
