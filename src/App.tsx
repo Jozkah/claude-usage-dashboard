@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { WifiOff } from 'lucide-react';
-import { removeAccount, shareLocalChats, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useTheme, useUsage } from './lib/api';
+import { removeAccount, shareLocalChats, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useTheme, useUsage } from './lib/api';
 import type { Account, RangeKey } from './lib/types';
 import { Aurora } from './components/Aurora';
 import { Header } from './components/Header';
@@ -77,6 +77,11 @@ export default function App() {
     try { setChatShareMessage(await syncCodeSetup()); }
     catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync local Claude Code setup.'); }
     setContextAccount(null);
+  };
+
+  const signInForUsage = async (account: Account) => {
+    await startAccountLogin(account.id);
+    setChatShareMessage(`Claude Code sign-in opened for ${account.name}. Finish sign-in there; usage will refresh automatically.`);
   };
 
   useEffect(() => {
@@ -193,7 +198,7 @@ export default function App() {
               </div>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))]">
                 {visible.map((a, i) => (
-                  <AccountCard key={a.id} account={a} now={now} delay={i * 80} onRemove={setToRemove} onContextMenu={(e) => openAccountMenu(a, e)} />
+                  <AccountCard key={a.id} account={a} now={now} delay={i * 80} onRemove={setToRemove} onLogin={signInForUsage} onContextMenu={(e) => openAccountMenu(a, e)} />
                 ))}
               </div>
               {visible.length === 0 && (

@@ -1,5 +1,6 @@
 import { KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
 import type { MouseEvent } from 'react';
+import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtClock, fmtDur, levelFor, mainWindows, paceFor } from '../lib/format';
 import { Chip } from './Chip';
@@ -11,6 +12,7 @@ interface Props {
   now: number;
   delay: number;
   onRemove: (a: Account) => void;
+  onLogin: (a: Account) => Promise<void>;
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
@@ -89,7 +91,21 @@ function Bar({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }
   );
 }
 
-export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }: Props) {
+export function AccountCard({ account: a, now, delay, onRemove, onLogin, onContextMenu }: Props) {
+  const [signingIn, setSigningIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const needsLogin = ['no_login', 'expired'].includes(a.authStatus ?? a.status);
+  const loginButton = needsLogin && (
+    <div className="mt-3">
+      <button disabled={signingIn} className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-50" onClick={async () => {
+        setSigningIn(true);
+        setLoginError(null);
+        try { await onLogin(a); } catch (error) { setLoginError(error instanceof Error ? error.message : 'Could not start sign-in.'); }
+        finally { setSigningIn(false); }
+      }}>{signingIn ? 'Opening sign-in…' : 'Sign in for usage'}</button>
+      {loginError && <p role="alert" className="mt-2 text-xs text-bad">{loginError}</p>}
+    </div>
+  );
   const remove = (
     <button
       onClick={() => onRemove(a)}
@@ -115,6 +131,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }:
           <div className="min-w-0">
             <div className="text-sm font-medium">{a.status === 'no_login' ? 'CLI usage login missing' : a.status === 'expired' ? 'Login expired' : 'Can’t read usage'}</div>
             <p className="mt-0.5 text-[13px] text-muted-fg">{a.message}</p>
+            {loginButton}
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>
         </div>
@@ -145,6 +162,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }:
         )}
         <Chats a={a} now={now} />
         {a.stale && <p className="mt-3 px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}
+        {loginButton}
         <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
       </div>
     </FrameCard>

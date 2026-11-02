@@ -21,6 +21,7 @@ test('persists last successful usage without credentials and restores it after r
 
     const snapshots = createUsageSnapshot(file);
     const stale = snapshots.fallback(account, { ...account, status: 'no_login', message: 'No login found.' });
+    assert.equal(stale.authStatus, 'no_login');
     assert.equal(stale.status, 'ok');
     assert.equal(stale.stale, true);
     assert.equal(stale.fetchedAt, 1234);

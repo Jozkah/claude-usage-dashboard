@@ -24,6 +24,7 @@ export interface Account {
   fetchedAt: number;
   plan?: string | null;
   status: AccountStatus;
+  authStatus?: AccountStatus;
   message?: string;
   windows?: UsageWindow[];
   sessions?: ChatSession[];

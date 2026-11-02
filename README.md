@@ -113,7 +113,7 @@ That lets anyone on your network see your usage percentages (never your logins).
 - It uses an **unofficial, undocumented endpoint** (the one Claude Code's `/usage` uses). It can
   change or stop working without notice. If the format changes, the card shows the raw response.
 - It never refreshes or changes a login. If a card says the login expired, open Claude Code with
-  that account once.
+  that account once. On a direct Windows installation, choose **Sign in for usage** on its card to open Claude Code's sign-in for that account. Complete the sign-in in the new window; the dashboard checks again automatically. Desktop sign-in and Claude Code usage login are separate.
 - History starts when you first run the dashboard and grows while it is running. The latest
   successful usage reading is also saved in `~/.claude-usage-latest.json` (or `DATA_DIR`). If a
   later reading fails, the dashboard shows that saved reading with its timestamp until live usage

@@ -51,6 +51,7 @@ export function createUsageSnapshot(file) {
         windows: last.windows,
         status: 'ok',
         stale: true,
+        authStatus: failed.status,
         staleMessage: failed.message || 'Live usage unavailable.',
       };
     },

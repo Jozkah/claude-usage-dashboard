@@ -501,6 +501,27 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
+    if (req.method === 'POST' && /^\/api\/accounts\/[^/]+\/login$/.test(url.pathname)) {
+      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (MOCK || ACCOUNTS_DIR || process.platform !== 'win32') {
+        return sendJson(res, 400, { error: 'Sign-in launcher requires a direct Windows installation.' });
+      }
+      const id = decodeURIComponent(url.pathname.split('/')[3]);
+      const account = loadAccounts().find((candidate) => candidate.id === id);
+      if (!account) return sendJson(res, 404, { error: 'Account not found.' });
+      try {
+        const child = spawn('cmd.exe', ['/k', 'claude auth login'], {
+          env: { ...process.env, CLAUDE_CONFIG_DIR: expandHome(account.configDir) },
+          detached: true, stdio: 'ignore', windowsHide: false,
+        });
+        child.on('error', (error) => console.error('Could not start Claude sign-in:', error));
+        child.unref();
+        return sendJson(res, 200, { ok: true });
+      } catch (error) {
+        return sendJson(res, 500, { error: 'Could not start Claude sign-in: ' + error.message });
+      }
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/chats/share') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local chat sharing requires a direct installation.' });
       if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {

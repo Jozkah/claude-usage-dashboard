@@ -30,6 +30,14 @@ export async function removeAccount(id: string): Promise<void> {
   await fetch('/api/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
 }
 
+export async function startAccountLogin(id: string): Promise<void> {
+  const res = await fetch('/api/accounts/' + encodeURIComponent(id) + '/login', { method: 'POST' });
+  if (!res.ok) {
+    const result = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(result.error || 'Could not start sign-in.');
+  }
+}
+
 export async function shareLocalChats(sourceId: string, targetId: string): Promise<string> {
   const res = await fetch('/api/chats/share', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
