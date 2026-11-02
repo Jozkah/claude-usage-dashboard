@@ -120,9 +120,10 @@ That lets anyone on your network see your usage percentages (never your logins).
   works again.
   Existing history supplies a one-time fallback until the next successful live reading; its
   reset times are unavailable.
-- When a saved weekly limit is fully used, automatic usage requests pause until 15 minutes before
-  its next expected reset. The estimate advances from the last reset returned by Anthropic; it is
-  labeled estimated until a fresh reading confirms it. Old five-hour resets cannot be inferred.
+- When a saved weekly limit is fully used, automatic usage requests pause until its recorded reset.
+  A past reset ends the pause, even if the last reading was 100%. Weekly display estimates advance
+  from the last reset returned by Anthropic; they are labeled estimated until a fresh reading
+  confirms them. Old five-hour resets cannot be inferred.
   Rate-limit responses use increasing retry delays, up to one hour. Manual refresh still respects
   Anthropic's retry delay.
 - The usage trend offers **All accounts** and shows one recorded reading immediately. Accounts

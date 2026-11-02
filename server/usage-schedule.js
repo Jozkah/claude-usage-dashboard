@@ -16,5 +16,5 @@ export function nextUsagePollAt(value, now) {
   if (limiting.some((window) => !Number.isFinite(Date.parse(window.resetsAt || '')) || Date.parse(window.resetsAt) <= now)) return now;
   const resets = limiting.map((window) => nextReset(window, now, value.stale));
   if (resets.some((reset) => !reset)) return now;
-  return Math.max(now, Math.max(...resets.map((reset) => reset.at)) - 15 * 60 * 1000);
+  return Math.max(...resets.map((reset) => reset.at));
 }

@@ -386,7 +386,7 @@ async function getStatus(acc, index, force) {
   if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
   const previous = hit?.value ?? latestUsage?.peek(acc);
   if (!force && previous && nextUsagePollAt(previous, Date.now()) > Date.now()) {
-    return previous.stale ? { ...previous, staleMessage: 'Usage limit reached. Next check shortly before estimated reset.' } : previous;
+    return previous.stale ? { ...previous, staleMessage: 'Usage limit reached. Next check at recorded reset.' } : previous;
   }
   // Respect rate limits even on manual refresh.
   const bo = backoff.get(acc.id);
