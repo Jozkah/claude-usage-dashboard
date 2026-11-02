@@ -22,11 +22,25 @@ function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?
   const reset = nextReset(w, now, stale);
   const countdown = reset ? fmtDur(reset.at - now) : null;
   const previousCycle = stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now;
+  if (previousCycle) {
+    return (
+      <div className="rounded-lg bg-frame/70 px-4 py-4">
+        <div className="text-[13px] font-medium">{w.label}</div>
+        <div className="mt-2 text-xs text-muted-fg">Last recorded {Math.round(w.used)}% · current usage pending</div>
+        <div className="mt-3 text-xs text-muted-fg">
+          {reset ? <>{reset.estimated ? 'Estimated reset ' : 'Reset '}
+            <span className="font-medium text-fg tabular-nums">{fmtDur(reset.at - now)}</span>
+            <span className="ml-1 text-subtle-fg">({fmtClock(reset.at)})</span></>
+            : retryAt && retryAt > now ? <>Next usage check in <span className="font-medium text-fg tabular-nums">{fmtDur(retryAt - now)}</span></>
+              : 'Waiting for fresh reset time'}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
-      {previousCycle ? <div className="grid h-[132px] place-items-center text-xs text-muted-fg">Current usage pending</div>
-        : <Ring used={w.used} elapsed={elapsedFraction(w, now)} />}
+      <Ring used={w.used} elapsed={elapsedFraction(w, now)} />
       <div className="mt-3 text-[12.5px] text-muted-fg">
         {countdown ? (
           <>
