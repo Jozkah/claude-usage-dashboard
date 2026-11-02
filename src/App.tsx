@@ -95,7 +95,7 @@ export default function App() {
       for (const w of a.windows ?? []) {
         if (!w.resetsAt) continue;
         const id = a.id + w.resetsAt;
-        if (new Date(w.resetsAt).getTime() < now && !resetSeen.current.has(id)) {
+        if (!a.stale && new Date(w.resetsAt).getTime() < now && now - new Date(w.resetsAt).getTime() < 60000 && !resetSeen.current.has(id)) {
           resetSeen.current.add(id);
           setTimeout(() => void refresh(true), 4000);
         }
@@ -187,7 +187,7 @@ export default function App() {
                 <div className="min-w-0 xl:col-span-2">
                   <TrendCard accounts={accounts} preferredId={selected} tick={tick} range={range} onRange={setRange} />
                 </div>
-                <ResetTimeline accounts={visible} now={now} />
+                <ResetTimeline accounts={accounts} now={now} />
               </div>
 
               <div className="mt-2 flex items-center justify-between">

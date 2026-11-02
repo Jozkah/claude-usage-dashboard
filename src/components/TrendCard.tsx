@@ -16,6 +16,20 @@ interface Props {
   onRange: (r: RangeKey) => void;
 }
 
+function AccountTrend({ account, selectedKey, range, mode, tick }: { account: Account; selectedKey: string; range: RangeKey; mode: 'bars' | 'area'; tick: number }) {
+  const window = account.windows?.find((item) => item.key === selectedKey) ?? account.windows?.[0];
+  const { points, ready } = useHistory(account.id, window?.key, range, tick);
+  return (
+    <div className="rounded-lg border border-line bg-frame/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium">{account.name} · {window?.label ?? 'No limit'}</span>
+        <span className="text-muted-fg">{window ? `${Math.round(window.used)}% used${account.stale ? ' · last reading' : ''}` : 'No reading'}</span>
+      </div>
+      <UsageChart points={points} range={range} mode={mode} ready={ready} seriesKey={`${account.id}:${window?.key}`} />
+    </div>
+  );
+}
+
 export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props) {
   const okAccounts = accounts.filter((a) => a.status === 'ok' && a.windows?.length);
   const [accId, setAccId] = useState('');
@@ -29,6 +43,7 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
   }, [preferredId]);
 
   const acc = okAccounts.find((a) => a.id === accId) ?? okAccounts[0];
+  const showAll = accId === 'all';
   const windows = acc?.windows ?? [];
   const win = windows.find((w) => w.key === key) ?? windows[0];
 
@@ -58,19 +73,20 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: win ? colorVar(levelFor(win.used)) : undefined }}>
-              {win ? <AnimatedNumber value={win.used} suffix="%" /> : '—'}
+              {showAll ? `${okAccounts.length} accounts` : win ? <AnimatedNumber value={win.used} suffix="%" /> : '—'}
             </div>
             <div className="mt-2 text-xs text-muted-fg">
-              {win ? <>now · peak <span className="font-medium text-fg">{Math.round(peak)}%</span> in this range</> : 'No data yet'}
+              {showAll ? 'Recorded usage for every account' : win ? <>now · peak <span className="font-medium text-fg">{Math.round(peak)}%</span> in this range</> : 'No data yet'}
             </div>
           </div>
           <div className="flex gap-2">
-            <Select label="Account" value={acc?.id ?? ''} onChange={setAccId} options={okAccounts.map((a) => ({ value: a.id, label: a.name }))} />
-            <Select label="Limit" value={win?.key ?? ''} onChange={setKey} options={windows.map((w) => ({ value: w.key, label: w.label }))} />
+            <Select label="Account" value={showAll ? 'all' : acc?.id ?? ''} onChange={setAccId} options={[{ value: 'all', label: 'All accounts' }, ...okAccounts.map((a) => ({ value: a.id, label: a.name }))]} />
+            <Select label="Limit" value={win?.key ?? ''} onChange={setKey} options={(showAll ? [...new Map(okAccounts.flatMap((a) => a.windows ?? []).map((w) => [w.key, w])).values()] : windows).map((w) => ({ value: w.key, label: w.label }))} />
           </div>
         </div>
         <div className="mt-4">
-          <UsageChart points={points} range={range} mode={mode} ready={ready} seriesKey={`${acc?.id}:${win?.key}`} />
+          {showAll ? <div className="space-y-3">{okAccounts.map((account) => <AccountTrend key={account.id} account={account} selectedKey={key} range={range} mode={mode} tick={tick} />)}</div>
+            : <UsageChart points={points} range={range} mode={mode} ready={ready} seriesKey={`${acc?.id}:${win?.key}`} />}
         </div>
       </div>
     </FrameCard>

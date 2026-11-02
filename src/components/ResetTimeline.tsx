@@ -2,21 +2,23 @@ import { useMemo } from 'react';
 import { CalendarClock, Hourglass, RotateCcw } from 'lucide-react';
 import type { Account } from '../lib/types';
 import { colorVar, fmtClock, fmtDur, levelFor } from '../lib/format';
+import { nextReset } from '../lib/reset';
 import { FrameCard } from './FrameCard';
 
 export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: number }) {
   const items = useMemo(() => {
-    const out: { id: string; account: string; label: string; at: number; used: number; five: boolean }[] = [];
+    const out: { id: string; account: string; label: string; at: number | null; used: number; five: boolean; estimated: boolean }[] = [];
     for (const a of accounts) {
-      if (a.status !== 'ok' || a.stale) continue;
+      let found = false;
       for (const w of a.windows ?? []) {
-        if (!w.resetsAt) continue;
-        const at = new Date(w.resetsAt).getTime();
-        if (!Number.isFinite(at) || at <= now) continue;
-        out.push({ id: a.id + w.key, account: a.name, label: w.label, at, used: w.used, five: w.key === 'five_hour' });
+        const reset = nextReset(w, now, a.stale);
+        if (!reset) continue;
+        found = true;
+        out.push({ id: a.id + w.key, account: a.name, label: w.label, at: reset.at, used: w.used, five: w.key === 'five_hour', estimated: reset.estimated });
       }
+      if (!found) out.push({ id: a.id, account: a.name, label: 'Reset time unavailable', at: null, used: 0, five: false, estimated: false });
     }
-    return out.sort((x, y) => x.at - y.at).slice(0, 6);
+    return out.sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity));
   }, [accounts, Math.floor(now / 30000)]);
 
   return (
@@ -34,11 +36,11 @@ export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: num
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium">{it.account}</div>
-                <div className="truncate text-xs text-muted-fg">{it.label}</div>
+                <div className="truncate text-xs text-muted-fg">{it.label}{it.estimated ? ' · estimated' : ''}</div>
               </div>
               <div className="text-right">
-                <div className="text-[13px] font-medium tabular-nums">{fmtDur(it.at - now)}</div>
-                <div className="text-[11.5px] text-subtle-fg">{fmtClock(it.at)}</div>
+                <div className="text-[13px] font-medium tabular-nums">{it.at ? fmtDur(it.at - now) : 'Unknown'}</div>
+                <div className="text-[11.5px] text-subtle-fg">{it.at ? fmtClock(it.at) : 'Awaiting live usage'}</div>
               </div>
             </li>
           ))}

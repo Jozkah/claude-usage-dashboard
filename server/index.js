@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { visibleUsageWindows } from './plan-limits.js';
+import { nextUsagePollAt } from './usage-schedule.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
@@ -250,10 +251,10 @@ async function fetchStatus(acc) {
       const ra = Number(res.headers.get('retry-after'));
       const prev = backoff.get(acc.id);
       const wait = Number.isFinite(ra) && ra > 0
-        ? Math.min(ra * 1000, 5 * 60 * 1000)
-        : Math.min((prev ? prev.wait : 60 * 1000) * 2, 5 * 60 * 1000);
+        ? Math.min(ra * 1000, 60 * 60 * 1000)
+        : Math.min((prev ? prev.wait : 60 * 1000) * 2, 60 * 60 * 1000);
       backoff.set(acc.id, { until: Date.now() + wait, wait });
-      return { ...base, plan, status: 'error', retryAt: Date.now() + wait, message: 'Anthropic is rate limiting the usage endpoint. Backing off; next try in ' + Math.ceil(wait / 60000) + ' min.' };
+      return { ...base, plan, status: 'error', retryAt: Date.now() + wait, message: 'Anthropic is rate limiting usage. Next try in ' + Math.ceil(wait / 60000) + ' min.' };
     }
     if (!res.ok) {
       return { ...base, plan, status: 'error', message: 'Usage endpoint answered HTTP ' + res.status + '.' };
@@ -383,9 +384,13 @@ async function getStatus(acc, index, force) {
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
   if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
-  // while backing off after a 429, never touch the endpoint (even on manual refresh)
+  const previous = hit?.value ?? latestUsage?.peek(acc);
+  if (!force && previous && nextUsagePollAt(previous, Date.now()) > Date.now()) {
+    return previous.stale ? { ...previous, staleMessage: 'Usage limit reached. Next check shortly before estimated reset.' } : previous;
+  }
+  // Respect rate limits even on manual refresh.
   const bo = backoff.get(acc.id);
-  if (hit && bo && Date.now() < bo.until && !(force && age > 30 * 1000)) return hit.value;
+  if (bo && Date.now() < bo.until && previous) return previous;
 
   let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
   if (value.windows) value = { ...value, windows: visibleUsageWindows(value.plan, value.windows) };

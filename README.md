@@ -120,6 +120,13 @@ That lets anyone on your network see your usage percentages (never your logins).
   works again.
   Existing history supplies a one-time fallback until the next successful live reading; its
   reset times are unavailable.
+- When a saved weekly limit is fully used, automatic usage requests pause until 15 minutes before
+  its next expected reset. The estimate advances from the last reset returned by Anthropic; it is
+  labeled estimated until a fresh reading confirms it. Old five-hour resets cannot be inferred.
+  Rate-limit responses use increasing retry delays, up to one hour. Manual refresh still respects
+  Anthropic's retry delay.
+- The usage trend offers **All accounts** and shows one recorded reading immediately. Accounts
+  without readings in the selected range display that fact instead of an endless loading state.
 - Local chat-log cost estimates use [Anthropic's API prices](https://platform.claude.com/docs/en/about-claude/pricing),
   including model-specific prompt caching, Haiku 5.5 long prompts, and recorded fast mode,
   US inference, batch, and web search usage. Changing the price table rebuilds saved estimates

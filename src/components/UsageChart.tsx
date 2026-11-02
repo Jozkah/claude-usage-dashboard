@@ -62,7 +62,7 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
   const y = (v: number) => PAD.t + plotH * (1 - v / 100);
   const xT = (t: number) => PAD.l + ((t - from) / span) * plotW;
 
-  const empty = ready && points.length < 2;
+  const empty = ready && points.length === 0;
 
   /* ----- hover handling ----- */
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -149,6 +149,8 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
               );
             })}
           </g>
+        ) : points.length === 1 ? (
+          <circle cx={xT(points[0][0])} cy={y(points[0][1])} r={5} style={{ fill: areaColor }} />
         ) : (
           <g key={seriesKey + range} className="animate-draw">
             <defs>
@@ -186,9 +188,9 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
 
       {empty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
-          <div className="text-sm font-medium">Collecting data…</div>
+          <div className="text-sm font-medium">No readings in this range</div>
           <div className="max-w-xs text-xs text-muted-fg">
-            The dashboard records a reading every few minutes while it runs. The trend appears here as it builds up.
+            Choose a longer range, or wait for a successful live usage reading.
           </div>
         </div>
       )}

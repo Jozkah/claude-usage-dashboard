@@ -16,6 +16,13 @@ export function createUsageSnapshot(file) {
   };
 
   return {
+    peek(account) {
+      const last = saved[account.id];
+      if (!last || last.configDir !== account.configDir || !Array.isArray(last.windows) || !last.windows.length) return null;
+      return { id: account.id, name: account.name, configDir: account.configDir,
+        fetchedAt: last.fetchedAt, plan: last.plan, windows: last.windows,
+        status: 'ok', stale: true, staleMessage: 'Waiting until reset approaches.' };
+    },
     remember(account, value) {
       if (value.status !== 'ok' || !Array.isArray(value.windows) || !value.windows.length) return;
       saved[account.id] = {

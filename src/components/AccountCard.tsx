@@ -3,6 +3,7 @@ import type { MouseEvent } from 'react';
 import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtClock, fmtDur, levelFor, mainWindows, paceFor } from '../lib/format';
+import { nextReset } from '../lib/reset';
 import { Chip } from './Chip';
 import { FrameCard } from './FrameCard';
 import { Ring } from './Ring';
@@ -18,8 +19,8 @@ interface Props {
 
 function Gauge({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
   const pace = paceFor(w, now);
-  const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
-  const countdown = !stale && resetAt && resetAt > now ? fmtDur(resetAt - now) : null;
+  const reset = nextReset(w, now, stale);
+  const countdown = reset ? fmtDur(reset.at - now) : null;
   return (
     <div className="rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
@@ -27,11 +28,11 @@ function Gauge({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean
       <div className="mt-3 text-[12.5px] text-muted-fg">
         {countdown ? (
           <>
-            Resets in <b className="font-semibold text-fg tabular-nums">{countdown}</b>
+            {reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums">{countdown}</b>
           </>
-        ) : stale ? 'Reset time outdated' : resetAt ? 'Awaiting updated reset' : 'Reset time unknown'}
+        ) : stale ? 'Reset time unavailable' : w.resetsAt ? 'Awaiting updated reset' : 'Reset time unknown'}
       </div>
-      {countdown && w.resetsAt && <div className="text-[11.5px] text-subtle-fg">{fmtClock(w.resetsAt)}</div>}
+      {reset && <div className="text-[11.5px] text-subtle-fg">{fmtClock(reset.at)}</div>}
       <div className="mt-2 h-5">{pace && <Chip tone={pace.tone}>{pace.label}</Chip>}</div>
     </div>
   );
@@ -67,8 +68,8 @@ function Chats({ a, now }: { a: Account; now: number }) {
 }
 
 function Bar({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
-  const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
-  const countdown = !stale && resetAt && resetAt > now ? fmtDur(resetAt - now) : null;
+  const reset = nextReset(w, now, stale);
+  const countdown = reset ? fmtDur(reset.at - now) : null;
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[13px]">
@@ -83,8 +84,8 @@ function Bar({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }
       </div>
       {(w.resetsAt || stale) && (
         <div className="mt-1 text-[11.5px] text-subtle-fg">
-          {countdown ? <>Resets in <span className="tabular-nums">{countdown}</span></>
-            : stale ? 'Reset time outdated' : 'Awaiting updated reset'}
+          {countdown ? <>{reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<span className="tabular-nums">{countdown}</span></>
+            : stale ? 'Reset time unavailable' : 'Awaiting updated reset'}
         </div>
       )}
     </div>
