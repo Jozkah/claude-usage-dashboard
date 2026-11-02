@@ -56,8 +56,8 @@ function Chats({ a }: { a: Account }) {
       </div>
       <ul className="flex flex-col gap-1 overflow-hidden">
         {shown.map((s) => (
-          <li key={s.id} className="flex items-center gap-2 text-[12.5px]">
-            <span title={s.state === 'waiting' ? 'Waiting' : 'Working'} className={s.state === 'waiting' ? 'size-2 shrink-0 animate-pulse rounded-full bg-warn' : 'live-dot'} />
+          <li key={s.id} className="flex min-w-0 items-center gap-2 text-[12.5px]">
+            <span title={s.state === 'waiting' ? 'Waiting' : 'Working'} className={`block size-[7px] shrink-0 rounded-full ${s.state === 'waiting' ? 'bg-warn' : 'bg-good'}`} />
             <span className="min-w-0 flex-1 truncate">{s.name || s.folder || 'Untitled chat'}</span>
             <span className="ml-auto shrink-0 text-[11.5px] text-subtle-fg tabular-nums">
               {s.state === 'waiting' ? 'waiting' : 'working'}
