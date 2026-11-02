@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, Flame, ListChecks, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, CircleX, Flame, ListChecks, TriangleAlert } from 'lucide-react';
 import type { Account, Level } from '../lib/types';
 import { colorVar, fmtDur, levelFor, paceFor } from '../lib/format';
+import { accountReset } from '../lib/reset';
 import { Chip } from './Chip';
 import { FrameCard } from './FrameCard';
 
@@ -13,14 +14,15 @@ interface Row {
   window: string;
   used: number;
   resetAt: number | null;
-  resetState: 'future' | 'outdated' | 'unknown';
+  estimated: boolean;
   pace: ReturnType<typeof paceFor>;
 }
 
-const STATUS: Record<Level, { label: string; icon: typeof CircleCheck }> = {
+const STATUS: Record<Level | 'reached', { label: string; icon: typeof CircleCheck }> = {
   good: { label: 'Healthy', icon: CircleCheck },
   warn: { label: 'Watch', icon: TriangleAlert },
   bad: { label: 'Near limit', icon: Flame },
+  reached: { label: 'Limit reached', icon: CircleX },
 };
 
 export function LimitTable({ accounts, now }: { accounts: Account[]; now: number }) {
@@ -31,15 +33,14 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
     for (const a of accounts) {
       if (a.status !== 'ok') continue;
       for (const w of a.windows ?? []) {
-        const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
-        const future = !a.stale && resetAt != null && resetAt > now;
+        const reset = accountReset(a, w, now);
         out.push({
           id: a.id + w.key,
           account: a.name,
           window: w.label,
           used: w.used,
-          resetAt: future ? resetAt : null,
-          resetState: future ? 'future' : a.stale || resetAt != null && resetAt <= now ? 'outdated' : 'unknown',
+          resetAt: reset?.at ?? null,
+          estimated: reset?.estimated ?? false,
           pace: paceFor(w, now),
         });
       }
@@ -87,7 +88,7 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
           <tbody>
             {rows.map((r, i) => {
               const lvl = levelFor(r.used);
-              const S = STATUS[lvl];
+              const S = STATUS[r.used >= 100 ? 'reached' : lvl];
               return (
                 <tr key={r.id} className="animate-fade border-b border-line/70 last:border-0 transition-colors hover:bg-frame/70" style={{ animationDelay: `${i * 35}ms` }}>
                   <td className="px-4 py-3 font-medium">{r.account}</td>
@@ -100,7 +101,10 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
                       <span className="w-10 text-right tabular-nums">{Math.round(r.used)}%</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 tabular-nums text-muted-fg">{r.resetAt ? fmtDur(r.resetAt - now) : r.resetState === 'outdated' ? 'Outdated' : '—'}</td>
+                  <td className="px-4 py-3 tabular-nums text-muted-fg">
+                    {r.resetAt ? <>{fmtDur(r.resetAt - now)}{r.estimated && <span className="ml-1 text-[11px] text-subtle-fg">est.</span>}</>
+                      : 'Awaiting live reset'}
+                  </td>
                   <td className="px-4 py-3">{r.pace ? <Chip tone={r.pace.tone}>{r.pace.label}</Chip> : <span className="text-subtle-fg">—</span>}</td>
                   <td className="px-4 py-3">
                     <Chip tone={lvl}><S.icon className="size-3" />{S.label}</Chip>

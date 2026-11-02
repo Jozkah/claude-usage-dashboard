@@ -1,4 +1,4 @@
-import type { UsageWindow } from './types';
+import type { Account, UsageWindow } from './types';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -8,4 +8,11 @@ export function nextReset(window: UsageWindow, now: number, stale = false): { at
   if (at > now) return { at, estimated: stale };
   if (!stale || !window.key.startsWith('seven_day')) return null;
   return { at: at + (Math.floor((now - at) / WEEK_MS) + 1) * WEEK_MS, estimated: true };
+}
+
+export function accountReset(account: Account, window: UsageWindow, now: number) {
+  if (account.stale && window.used >= 100 && account.nextPollAt) {
+    return account.nextPollAt > now ? { at: account.nextPollAt, estimated: true } : null;
+  }
+  return nextReset(window, now, account.stale);
 }

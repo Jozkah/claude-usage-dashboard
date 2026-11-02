@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { CalendarClock, Hourglass, RotateCcw } from 'lucide-react';
 import type { Account } from '../lib/types';
 import { colorVar, fmtClock, fmtDur, levelFor } from '../lib/format';
-import { nextReset } from '../lib/reset';
+import { accountReset } from '../lib/reset';
 import { FrameCard } from './FrameCard';
 
 export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: number }) {
@@ -11,7 +11,7 @@ export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: num
     for (const a of accounts) {
       let found = false;
       for (const w of a.windows ?? []) {
-        const reset = nextReset(w, now, a.stale);
+        const reset = accountReset(a, w, now);
         if (!reset) continue;
         found = true;
         out.push({ id: a.id + w.key, account: a.name, label: w.label, at: reset.at, used: w.used, five: w.key === 'five_hour', estimated: reset.estimated });

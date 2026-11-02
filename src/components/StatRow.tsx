@@ -1,7 +1,7 @@
 import { Clock, Flame, Trophy, Users } from 'lucide-react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, fmtDur, headroom, levelFor } from '../lib/format';
-import { nextReset } from '../lib/reset';
+import { accountReset } from '../lib/reset';
 import { useHistory } from '../lib/api';
 import { AnimatedNumber } from './AnimatedNumber';
 import { FrameCard } from './FrameCard';
@@ -34,7 +34,7 @@ export function StatRow({ accounts, now, tick }: Props) {
   let next: { acc: Account; w: UsageWindow; at: number; estimated: boolean } | null = null;
   for (const a of ok) {
     for (const w of a.windows ?? []) {
-      const reset = nextReset(w, now, a.stale);
+      const reset = accountReset(a, w, now);
       if (reset && (!next || reset.at < next.at)) next = { acc: a, w, ...reset };
     }
   }

@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react';
 import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtClock, fmtDur, levelFor, mainWindows, paceFor } from '../lib/format';
-import { nextReset } from '../lib/reset';
+import { accountReset } from '../lib/reset';
 import { Chip } from './Chip';
 import { FrameCard } from './FrameCard';
 import { Ring } from './Ring';
@@ -17,9 +17,10 @@ interface Props {
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
-function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?: boolean; retryAt?: number }) {
+function Gauge({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
+  const { stale, retryAt } = account;
   const pace = paceFor(w, now);
-  const reset = nextReset(w, now, stale);
+  const reset = accountReset(account, w, now);
   const countdown = reset ? fmtDur(reset.at - now) : null;
   const previousCycle = stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now;
   return (
@@ -71,8 +72,9 @@ function Chats({ a }: { a: Account }) {
   );
 }
 
-function Bar({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
-  const reset = nextReset(w, now, stale);
+function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
+  const { stale } = account;
+  const reset = accountReset(account, w, now);
   const countdown = reset ? fmtDur(reset.at - now) : null;
   return (
     <div>
@@ -161,10 +163,10 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
     >
       <div className="flex min-w-0 flex-1 flex-col p-3">
         <div className={`grid gap-3 ${main.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-          {main.map((w) => <Gauge key={w.key} w={w} now={now} stale={a.stale} retryAt={a.retryAt} />)}
+          {main.map((w) => <Gauge key={w.key} w={w} now={now} account={a} />)}
         </div>
         {rest.length > 0 && (
-          <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} stale={a.stale} />)}</div>
+          <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} account={a} />)}</div>
         )}
         <Chats a={a} />
         <div className="mt-auto flex min-h-[92px] flex-col justify-end">

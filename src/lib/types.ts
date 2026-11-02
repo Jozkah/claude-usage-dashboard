@@ -27,6 +27,7 @@ export interface Account {
   status: AccountStatus;
   authStatus?: AccountStatus;
   retryAt?: number;
+  nextPollAt?: number | null;
   message?: string;
   windows?: UsageWindow[];
   sessions?: ChatSession[];
