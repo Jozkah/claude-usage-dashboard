@@ -383,11 +383,17 @@ async function getStatus(acc, index, force) {
   latestUsage?.seedFromHistory(acc, history[acc.id], LABELS);
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
   const previous = hit?.value ?? latestUsage?.peek(acc);
-  if (!force && previous && nextUsagePollAt(previous, Date.now()) > Date.now()) {
-    return previous.stale ? { ...previous, staleMessage: 'Usage limit reached. Next check at recorded reset.' } : previous;
+  const nextPollAt = previous?.nextPollAt || nextUsagePollAt(previous, Date.now());
+  if (previous && nextPollAt > Date.now()) {
+    latestUsage?.deferUntil(acc, nextPollAt);
+    const paused = previous.stale
+      ? { ...previous, nextPollAt, staleMessage: 'Next usage check at estimated reset.' }
+      : { ...previous, nextPollAt };
+    if (hit) hit.value = paused;
+    return paused;
   }
+  if (hit && ((age < CACHE_MS && !force) || age < MIN_FORCE_MS)) return hit.value;
   // Respect rate limits even on manual refresh.
   const bo = backoff.get(acc.id);
   if (bo && Date.now() < bo.until && previous) return previous;

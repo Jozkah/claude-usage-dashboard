@@ -167,7 +167,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
         )}
         <Chats a={a} now={now} />
         <div className="mt-auto flex min-h-[92px] flex-col justify-end">
-          {a.stale && <p className="px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}
+          {a.stale && <p className="px-1 text-[11px] leading-relaxed text-subtle-fg">Last read {new Date(a.fetchedAt).toLocaleString()} · {a.staleMessage}</p>}
           {loginButton}
           <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
         </div>

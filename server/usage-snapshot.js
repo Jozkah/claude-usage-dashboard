@@ -21,7 +21,7 @@ export function createUsageSnapshot(file) {
       const last = saved[account.id];
       if (!last || last.configDir !== account.configDir || !Array.isArray(last.windows) || !last.windows.length) return null;
       return { id: account.id, name: account.name, configDir: account.configDir,
-        fetchedAt: last.fetchedAt, plan: last.plan, windows: visibleUsageWindows(last.plan, last.windows),
+        fetchedAt: last.fetchedAt, plan: last.plan, windows: visibleUsageWindows(last.plan, last.windows), nextPollAt: last.nextPollAt,
         status: 'ok', stale: true, staleMessage: 'Waiting until reset approaches.' };
     },
     remember(account, value) {
@@ -31,7 +31,14 @@ export function createUsageSnapshot(file) {
         fetchedAt: value.fetchedAt,
         plan: value.plan,
         windows: value.windows,
+        nextPollAt: null,
       };
+      write();
+    },
+    deferUntil(account, at) {
+      const last = saved[account.id];
+      if (!last || last.configDir !== account.configDir || last.nextPollAt === at) return;
+      last.nextPollAt = at;
       write();
     },
     seedFromHistory(account, history, labels) {
@@ -57,6 +64,7 @@ export function createUsageSnapshot(file) {
         plan: last.plan,
         fetchedAt: last.fetchedAt,
         windows: visibleUsageWindows(last.plan, last.windows),
+        nextPollAt: last.nextPollAt,
         status: 'ok',
         stale: true,
         authStatus: failed.status,

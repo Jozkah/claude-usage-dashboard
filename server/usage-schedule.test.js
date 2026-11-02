@@ -14,5 +14,5 @@ test('holds capped account until reset, keeps uncapped account polling', () => {
   const window = { key: 'seven_day', used: 100, resetsAt: '2026-11-04T07:00:00Z' };
   assert.equal(nextUsagePollAt({ status: 'ok', windows: [window] }, now), Date.parse('2026-11-04T07:00:00Z'));
   assert.equal(nextUsagePollAt({ status: 'ok', windows: [{ ...window, used: 99 }] }, now), now);
-  assert.equal(nextUsagePollAt({ status: 'ok', stale: true, windows: [{ ...window, resetsAt: '2026-10-14T07:00:00Z' }] }, now), now);
+  assert.equal(nextUsagePollAt({ status: 'ok', stale: true, windows: [{ ...window, resetsAt: '2026-10-14T07:00:00Z' }] }, now), Date.parse('2026-11-04T07:00:00Z'));
 });

@@ -12,8 +12,6 @@ export function nextUsagePollAt(value, now) {
   if (!value || value.status !== 'ok' || !Array.isArray(value.windows)) return now;
   const limiting = value.windows.filter((window) => window.used >= 100);
   if (!limiting.length) return now;
-  // A reading from an earlier cycle cannot prove this cycle is still capped.
-  if (limiting.some((window) => !Number.isFinite(Date.parse(window.resetsAt || '')) || Date.parse(window.resetsAt) <= now)) return now;
   const resets = limiting.map((window) => nextReset(window, now, value.stale));
   if (resets.some((reset) => !reset)) return now;
   return Math.max(...resets.map((reset) => reset.at));

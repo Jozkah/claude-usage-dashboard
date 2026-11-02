@@ -19,15 +19,18 @@ test('persists last successful usage without credentials and restores it after r
       raw: { secret: 'must not persist' },
     };
     createUsageSnapshot(file).remember(account, success);
+    createUsageSnapshot(file).deferUntil(account, Date.parse('2026-11-04T07:00:00Z'));
     const saved = fs.readFileSync(file, 'utf8');
     assert.equal(saved.includes('secret'), false);
 
     const snapshots = createUsageSnapshot(file);
+    assert.equal(snapshots.peek(account).nextPollAt, Date.parse('2026-11-04T07:00:00Z'));
     const stale = snapshots.fallback(account, { ...account, status: 'no_login', message: 'No login found.' });
     assert.equal(stale.authStatus, 'no_login');
     assert.equal(stale.status, 'ok');
     assert.equal(stale.stale, true);
     assert.equal(stale.fetchedAt, 1234);
+    assert.equal(stale.nextPollAt, Date.parse('2026-11-04T07:00:00Z'));
     assert.deepEqual(stale.windows.map((window) => window.key), ['seven_day']);
     assert.deepEqual(snapshots.peek(account).windows.map((window) => window.key), ['seven_day']);
     assert.match(stale.staleMessage, /No login found/);
