@@ -23,11 +23,11 @@ function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?
   const countdown = reset ? fmtDur(reset.at - now) : null;
   const previousCycle = stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now;
   return (
-    <div className="rounded-lg bg-frame/70 px-2 py-4 text-center">
+    <div className="flex h-[300px] min-w-0 flex-col rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
       <Ring used={w.used} elapsed={previousCycle ? null : elapsedFraction(w, now)} stale={stale} />
       {previousCycle && <div className="mt-2 text-[11.5px] text-subtle-fg">Current usage pending</div>}
-      <div className="mt-3 text-[12.5px] text-muted-fg">
+      <div className="mt-auto pt-3 text-[12.5px] text-muted-fg">
         {countdown ? (
           <>
             {reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums">{countdown}</b>
@@ -43,18 +43,17 @@ function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?
 
 function Chats({ a, now }: { a: Account; now: number }) {
   const list = a.sessions ?? [];
-  if (!list.length) return null;
   const working = list.filter((s) => s.working).length;
   const shown = list.slice(0, 4);
   return (
-    <div className="mt-3 rounded-lg border border-line bg-frame/50 px-3 py-2.5">
+    <div className="mt-3 h-[136px] overflow-hidden rounded-lg border border-line bg-frame/50 px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium">
         <span>Chats</span>
         <span className="text-muted-fg tabular-nums">
           {working > 0 ? `${working} working · ` : ''}{list.length} open
         </span>
       </div>
-      <ul className="flex flex-col gap-1">
+      <ul className="flex max-h-[88px] flex-col gap-1 overflow-y-auto">
         {shown.map((s) => (
           <li key={s.id} className="flex items-center gap-2 text-[12.5px]">
             <span className={s.working ? 'live-dot' : 'size-2 shrink-0 rounded-full bg-subtle-fg/50'} />
@@ -65,6 +64,7 @@ function Chats({ a, now }: { a: Account; now: number }) {
           </li>
         ))}
       </ul>
+      {!list.length && <div className="mt-3 text-center text-xs text-subtle-fg">No open chats</div>}
       {list.length > shown.length && <div className="mt-1 text-[11.5px] text-subtle-fg">+{list.length - shown.length} more</div>}
     </div>
   );
@@ -155,19 +155,22 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
       right={right}
       delay={delay}
       beam={critical}
+      bodyClassName="flex"
       onContextMenu={onContextMenu}
     >
-      <div className="p-3">
-        <div className="grid grid-cols-2 gap-3">
+      <div className="flex min-w-0 flex-1 flex-col p-3">
+        <div className={`grid gap-3 ${main.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
           {main.map((w) => <Gauge key={w.key} w={w} now={now} stale={a.stale} retryAt={a.retryAt} />)}
         </div>
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} stale={a.stale} />)}</div>
         )}
         <Chats a={a} now={now} />
-        {a.stale && <p className="mt-3 px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}
-        {loginButton}
-        <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
+        <div className="mt-auto flex min-h-[92px] flex-col justify-end">
+          {a.stale && <p className="px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}
+          {loginButton}
+          <p className="mt-3 truncate px-1 text-[11.5px] text-subtle-fg">{a.configDir}</p>
+        </div>
       </div>
     </FrameCard>
   );
