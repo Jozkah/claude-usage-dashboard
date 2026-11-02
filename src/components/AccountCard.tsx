@@ -47,18 +47,18 @@ function Chats({ a }: { a: Account }) {
   const waiting = list.filter((s) => s.state === 'waiting').length;
   const shown = list.slice(0, 4);
   return (
-    <div className="mt-3 h-[136px] overflow-hidden rounded-lg border border-line bg-frame/50 px-3 py-2.5">
+    <div className="mt-3 h-[160px] overflow-hidden rounded-lg border border-line bg-frame/50 px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium">
         <span>Chats</span>
         <span className="text-muted-fg tabular-nums">
           {working > 0 ? `${working} working` : ''}{working && waiting ? ' · ' : ''}{waiting > 0 ? `${waiting} waiting` : ''}{!working && !waiting ? '0 active' : ''}
         </span>
       </div>
-      <ul className="flex max-h-[88px] flex-col gap-1 overflow-y-auto">
+      <ul className="flex flex-col gap-1 overflow-hidden">
         {shown.map((s) => (
           <li key={s.id} className="flex items-center gap-2 text-[12.5px]">
             <span title={s.state === 'waiting' ? 'Waiting' : 'Working'} className={s.state === 'waiting' ? 'size-2 shrink-0 animate-pulse rounded-full bg-warn' : 'live-dot'} />
-            <span className="truncate">{s.name || s.folder || 'Untitled chat'}</span>
+            <span className="min-w-0 flex-1 truncate">{s.name || s.folder || 'Untitled chat'}</span>
             <span className="ml-auto shrink-0 text-[11.5px] text-subtle-fg tabular-nums">
               {s.state === 'waiting' ? 'waiting' : 'working'}
             </span>
