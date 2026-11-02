@@ -71,7 +71,7 @@ Use **Add account** in the sidebar for others: give it a name and the account's 
 
 Max 5x and Max 20x cards omit the five-hour session window, including old cached readings. Other plans retain any five-hour window returned by their account's usage response.
 
-On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Desktop with a separate Work app profile. Double-clicking it no longer leaves an unused Claude Code console running. Copy it and [scripts/claude-work.vbs](scripts/claude-work.vbs) to your Desktop, then double-click the `.vbs` file for a fully hidden launcher console. Run `claude-work.cmd --cli` from a terminal when you want interactive Work Claude Code; other arguments pass through to the CLI. [scripts/claude-third.vbs](scripts/claude-third.vbs) opens an isolated Third Desktop profile using `~/.claude-third` for Claude Code. Sign in to each account separately once; launcher does not copy credentials.
+On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Desktop with a separate Work app profile. For a Desktop icon, create a shortcut to `wscript.exe` with [scripts/claude-work.vbs](scripts/claude-work.vbs) as its argument; leave launcher files in the repository so their relative paths work. Run `scripts/claude-work.cmd --cli` from a terminal when you want interactive Work Claude Code; other arguments pass through to the CLI. [scripts/claude-third.vbs](scripts/claude-third.vbs) opens an isolated Third Desktop profile using `~/.claude-third` for Claude Code. Sign in to each account separately once; launcher does not copy credentials.
 
 ## Share local Claude Code chats
 

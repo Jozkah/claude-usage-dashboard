@@ -1,4 +1,6 @@
+Option Explicit
 ' Launch claude-work.cmd without a visible command window.
+Dim shell, files, launcher
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 launcher = files.BuildPath(files.GetParentFolderName(WScript.ScriptFullName), "claude-work.cmd")
