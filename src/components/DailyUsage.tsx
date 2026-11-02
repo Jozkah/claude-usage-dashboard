@@ -43,7 +43,21 @@ function useTokens(): TokenReport | null {
 const tok = (n: number) =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
 const usd = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
-const shortModel = (m: string) => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
+function modelName(id: string): string {
+  const clean = id.replace(/^anthropic\./i, '').replace(/-\d{8}$/, '');
+  const legacy = /^claude-(\d+)-(\d+)-([a-z]+)(.*)$/i.exec(clean);
+  if (legacy) {
+    const family = legacy[3][0].toUpperCase() + legacy[3].slice(1);
+    const suffix = legacy[4].replace(/^-/, '').replace(/-/g, ' ');
+    return `Claude ${family} ${legacy[1]}.${legacy[2]}${suffix ? ` ${suffix}` : ''}`;
+  }
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean);
+  if (!match) return id === 'unknown' ? 'Unknown model' : id;
+  const family = match[1][0].toUpperCase() + match[1].slice(1);
+  const version = match[3] ? `${match[2]}.${match[3]}` : match[2];
+  const suffix = match[4].replace(/^-/, '').replace(/-/g, ' ');
+  return `Claude ${family} ${version}${suffix ? ` ${suffix}` : ''}`;
+}
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -127,7 +141,7 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
       val,
       totalTok, totalCost, unpriced,
       activeDays: days.length,
-      models: merge((d) => d.models).map((m) => ({ ...m, name: shortModel(m.name) })),
+      models: merge((d) => d.models).map((m) => ({ ...m, name: modelName(m.name) })),
       projects: merge((d) => d.projects),
       table: [...days].sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
@@ -218,7 +232,7 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
                         <td className="px-3 py-1.5 tabular-nums">{d.date}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{tok(d.total)}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{usd(d.cost)}</td>
-                        <td className="hidden max-w-[180px] truncate px-3 py-1.5 text-muted-fg sm:table-cell">{d.models[0] ? shortModel(d.models[0].name) : '–'}</td>
+                        <td className="hidden max-w-[180px] truncate px-3 py-1.5 text-muted-fg sm:table-cell">{d.models[0] ? modelName(d.models[0].name) : '–'}</td>
                       </tr>
                     ))}
                     {view.table.length === 0 && (
