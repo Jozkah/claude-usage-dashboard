@@ -37,8 +37,7 @@ export function Ring({ used, elapsed, size = 132, stale = false }: Props) {
           style={{
             stroke: color,
             transition: 'stroke-dashoffset 1.2s var(--ease-out-expo), stroke 0.4s',
-            opacity: stale ? 0.65 : 1,
-            filter: stale ? 'none' : `drop-shadow(0 0 6px color-mix(in srgb, ${color} 35%, transparent))`,
+            filter: `drop-shadow(0 0 6px color-mix(in srgb, ${color} 35%, transparent))`,
           }}
         />
         {elapsed != null && (
