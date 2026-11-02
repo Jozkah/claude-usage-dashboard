@@ -8,14 +8,16 @@ export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: num
   const items = useMemo(() => {
     const out: { id: string; account: string; label: string; at: number; used: number; five: boolean }[] = [];
     for (const a of accounts) {
-      if (a.status !== 'ok') continue;
+      if (a.status !== 'ok' || a.stale) continue;
       for (const w of a.windows ?? []) {
         if (!w.resetsAt) continue;
-        out.push({ id: a.id + w.key, account: a.name, label: w.label, at: new Date(w.resetsAt).getTime(), used: w.used, five: w.key === 'five_hour' });
+        const at = new Date(w.resetsAt).getTime();
+        if (!Number.isFinite(at) || at <= now) continue;
+        out.push({ id: a.id + w.key, account: a.name, label: w.label, at, used: w.used, five: w.key === 'five_hour' });
       }
     }
     return out.sort((x, y) => x.at - y.at).slice(0, 6);
-  }, [accounts]);
+  }, [accounts, Math.floor(now / 30000)]);
 
   return (
     <FrameCard icon={<CalendarClock className="size-3.5 text-subtle-fg" />} title="Upcoming resets" delay={90} className="h-full">

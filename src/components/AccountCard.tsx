@@ -14,20 +14,22 @@ interface Props {
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
 }
 
-function Gauge({ w, now }: { w: UsageWindow; now: number }) {
+function Gauge({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
   const pace = paceFor(w, now);
+  const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
+  const countdown = !stale && resetAt && resetAt > now ? fmtDur(resetAt - now) : null;
   return (
     <div className="rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
       <Ring used={w.used} elapsed={elapsedFraction(w, now)} />
       <div className="mt-3 text-[12.5px] text-muted-fg">
-        {w.resetsAt ? (
+        {countdown ? (
           <>
-            Resets in <b className="font-semibold text-fg tabular-nums">{fmtDur(new Date(w.resetsAt).getTime() - now)}</b>
+            Resets in <b className="font-semibold text-fg tabular-nums">{countdown}</b>
           </>
-        ) : 'Reset time unknown'}
+        ) : stale ? 'Reset time outdated' : resetAt ? 'Awaiting updated reset' : 'Reset time unknown'}
       </div>
-      {w.resetsAt && <div className="text-[11.5px] text-subtle-fg">{fmtClock(w.resetsAt)}</div>}
+      {countdown && w.resetsAt && <div className="text-[11.5px] text-subtle-fg">{fmtClock(w.resetsAt)}</div>}
       <div className="mt-2 h-5">{pace && <Chip tone={pace.tone}>{pace.label}</Chip>}</div>
     </div>
   );
@@ -62,7 +64,9 @@ function Chats({ a, now }: { a: Account; now: number }) {
   );
 }
 
-function Bar({ w, now }: { w: UsageWindow; now: number }) {
+function Bar({ w, now, stale }: { w: UsageWindow; now: number; stale?: boolean }) {
+  const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
+  const countdown = !stale && resetAt && resetAt > now ? fmtDur(resetAt - now) : null;
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[13px]">
@@ -75,9 +79,10 @@ function Bar({ w, now }: { w: UsageWindow; now: number }) {
           style={{ width: `${w.used}%`, background: colorVar(levelFor(w.used)), transition: 'width 1s var(--ease-out-expo)' }}
         />
       </div>
-      {w.resetsAt && (
+      {(w.resetsAt || stale) && (
         <div className="mt-1 text-[11.5px] text-subtle-fg">
-          Resets in <span className="tabular-nums">{fmtDur(new Date(w.resetsAt).getTime() - now)}</span>
+          {countdown ? <>Resets in <span className="tabular-nums">{countdown}</span></>
+            : stale ? 'Reset time outdated' : 'Awaiting updated reset'}
         </div>
       )}
     </div>
@@ -133,10 +138,10 @@ export function AccountCard({ account: a, now, delay, onRemove, onContextMenu }:
     >
       <div className="p-3">
         <div className="grid grid-cols-2 gap-3">
-          {main.map((w) => <Gauge key={w.key} w={w} now={now} />)}
+          {main.map((w) => <Gauge key={w.key} w={w} now={now} stale={a.stale} />)}
         </div>
         {rest.length > 0 && (
-          <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} />)}</div>
+          <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} stale={a.stale} />)}</div>
         )}
         <Chats a={a} now={now} />
         {a.stale && <p className="mt-3 px-1 text-xs text-warn">Last read {new Date(a.fetchedAt).toLocaleString()}. Live usage unavailable: {a.staleMessage}</p>}

@@ -13,6 +13,7 @@ interface Row {
   window: string;
   used: number;
   resetAt: number | null;
+  resetState: 'future' | 'outdated' | 'unknown';
   pace: ReturnType<typeof paceFor>;
 }
 
@@ -30,12 +31,15 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
     for (const a of accounts) {
       if (a.status !== 'ok') continue;
       for (const w of a.windows ?? []) {
+        const resetAt = w.resetsAt ? new Date(w.resetsAt).getTime() : null;
+        const future = !a.stale && resetAt != null && resetAt > now;
         out.push({
           id: a.id + w.key,
           account: a.name,
           window: w.label,
           used: w.used,
-          resetAt: w.resetsAt ? new Date(w.resetsAt).getTime() : null,
+          resetAt: future ? resetAt : null,
+          resetState: future ? 'future' : a.stale || resetAt != null && resetAt <= now ? 'outdated' : 'unknown',
           pace: paceFor(w, now),
         });
       }
@@ -96,7 +100,7 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
                       <span className="w-10 text-right tabular-nums">{Math.round(r.used)}%</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 tabular-nums text-muted-fg">{r.resetAt ? fmtDur(r.resetAt - now) : '—'}</td>
+                  <td className="px-4 py-3 tabular-nums text-muted-fg">{r.resetAt ? fmtDur(r.resetAt - now) : r.resetState === 'outdated' ? 'Outdated' : '—'}</td>
                   <td className="px-4 py-3">{r.pace ? <Chip tone={r.pace.tone}>{r.pace.label}</Chip> : <span className="text-subtle-fg">—</span>}</td>
                   <td className="px-4 py-3">
                     <Chip tone={lvl}><S.icon className="size-3" />{S.label}</Chip>

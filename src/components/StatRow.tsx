@@ -32,6 +32,7 @@ export function StatRow({ accounts, now, tick }: Props) {
   // soonest reset
   let next: { acc: Account; w: UsageWindow; at: number } | null = null;
   for (const a of ok) {
+    if (a.stale) continue;
     for (const w of a.windows ?? []) {
       if (!w.resetsAt) continue;
       const at = new Date(w.resetsAt).getTime();
