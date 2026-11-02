@@ -16,7 +16,7 @@ interface Props {
 const Icon = ({ children }: { children: React.ReactNode }) => <span className="text-subtle-fg [&>svg]:size-3.5">{children}</span>;
 
 function Body({ children }: { children: React.ReactNode }) {
-  return <div className="flex min-h-[132px] flex-col justify-between gap-3 p-4">{children}</div>;
+  return <div className="flex min-h-[160px] flex-col justify-between gap-3 p-4">{children}</div>;
 }
 
 export function StatRow({ accounts, now, tick }: Props) {
@@ -72,7 +72,7 @@ export function StatRow({ accounts, now, tick }: Props) {
 
       <FrameCard icon={<Icon><Trophy /></Icon>} title="Most room right now" delay={70}>
         <Body>
-          <div>
+          <div className="min-h-[76px]">
             <div className="truncate text-[22px] leading-none font-semibold tracking-tight">{best ? best.name : '—'}</div>
             <div className="mt-2 text-xs text-muted-fg">
               {best ? (
@@ -88,11 +88,11 @@ export function StatRow({ accounts, now, tick }: Props) {
 
       <FrameCard icon={<Icon><Flame /></Icon>} title="Tightest limit" delay={140}>
         <Body>
-          <div>
+          <div className="min-h-[76px]">
             <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: tightColor }}>
               {tight ? <AnimatedNumber value={tight.w.used} suffix="%" /> : '—'}
             </div>
-            <div className="mt-2 truncate text-xs text-muted-fg">{tight ? `${tight.acc.name} · ${tight.w.label}${tight.acc.stale ? ' · last recorded' : ''}` : 'No data yet'}</div>
+            <div className="mt-2 text-xs leading-relaxed text-muted-fg">{tight ? `${tight.acc.name} · ${tight.w.label}${tight.acc.stale ? ' · last recorded' : ''}` : 'No data yet'}</div>
           </div>
           <Sparkline values={tightHist.points.map((p) => p[1])} color={tightColor} />
         </Body>
