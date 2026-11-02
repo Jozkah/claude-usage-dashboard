@@ -21,6 +21,7 @@ import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js'
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { visibleUsageWindows } from './plan-limits.js';
 import { nextUsagePollAt } from './usage-schedule.js';
+import { activeSessionState } from './session-activity.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
@@ -193,8 +194,6 @@ function parseWindows(data) {
 
 /* Open Claude Code chats for one account. Claude Code writes <configDir>/sessions/<pid>.json
    for every running session and touches it while the chat is working. */
-const WORKING_MS = 2 * 60 * 1000;
-
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; }
 }
@@ -210,6 +209,8 @@ function readSessions(configDir) {
       const file = path.join(dir, f);
       const mtime = fs.statSync(file).mtimeMs;
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const state = activeSessionState(j.status);
+      if (!state) continue;
       const alive = inContainer ? Date.now() - mtime < 10 * 60 * 1000 : pidAlive(j.pid);
       if (!alive) continue;
       out.push({
@@ -219,7 +220,8 @@ function readSessions(configDir) {
         where: String(j.entrypoint || '').replace(/^claude-/, '') || null,
         startedAt: Number(j.startedAt) || null,
         lastActiveAt: mtime,
-        working: Date.now() - mtime < WORKING_MS,
+        state,
+        working: state === 'busy',
       });
     } catch { /* unreadable file: ignore */ }
   }

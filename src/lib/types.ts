@@ -13,6 +13,7 @@ export interface ChatSession {
   startedAt: number | null;
   lastActiveAt: number;
   working: boolean;
+  state?: 'busy' | 'waiting';
 }
 
 export type AccountStatus = 'ok' | 'no_login' | 'expired' | 'error';

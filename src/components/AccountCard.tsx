@@ -41,30 +41,31 @@ function Gauge({ w, now, stale, retryAt }: { w: UsageWindow; now: number; stale?
   );
 }
 
-function Chats({ a, now }: { a: Account; now: number }) {
+function Chats({ a }: { a: Account }) {
   const list = a.sessions ?? [];
   const working = list.filter((s) => s.working).length;
+  const waiting = list.filter((s) => s.state === 'waiting').length;
   const shown = list.slice(0, 4);
   return (
     <div className="mt-3 h-[136px] overflow-hidden rounded-lg border border-line bg-frame/50 px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium">
         <span>Chats</span>
         <span className="text-muted-fg tabular-nums">
-          {working > 0 ? `${working} working · ` : ''}{list.length} open
+          {working > 0 ? `${working} working` : ''}{working && waiting ? ' · ' : ''}{waiting > 0 ? `${waiting} waiting` : ''}{!working && !waiting ? '0 active' : ''}
         </span>
       </div>
       <ul className="flex max-h-[88px] flex-col gap-1 overflow-y-auto">
         {shown.map((s) => (
           <li key={s.id} className="flex items-center gap-2 text-[12.5px]">
-            <span className={s.working ? 'live-dot' : 'size-2 shrink-0 rounded-full bg-subtle-fg/50'} />
+            <span title={s.state === 'waiting' ? 'Waiting' : 'Working'} className={s.state === 'waiting' ? 'size-2 shrink-0 animate-pulse rounded-full bg-warn' : 'live-dot'} />
             <span className="truncate">{s.name || s.folder || 'Untitled chat'}</span>
             <span className="ml-auto shrink-0 text-[11.5px] text-subtle-fg tabular-nums">
-              {s.working ? 'now' : `${fmtDur(now - s.lastActiveAt)} ago`}
+              {s.state === 'waiting' ? 'waiting' : 'working'}
             </span>
           </li>
         ))}
       </ul>
-      {!list.length && <div className="mt-3 text-center text-xs text-subtle-fg">No open chats</div>}
+      {!list.length && <div className="mt-3 text-center text-xs text-subtle-fg">No active chats</div>}
       {list.length > shown.length && <div className="mt-1 text-[11.5px] text-subtle-fg">+{list.length - shown.length} more</div>}
     </div>
   );
@@ -139,7 +140,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>
         </div>
-        <div className="px-4 pb-4 -mt-1"><Chats a={a} now={now} /></div>
+        <div className="px-4 pb-4 -mt-1"><Chats a={a} /></div>
       </FrameCard>
     );
   }
@@ -165,7 +166,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} stale={a.stale} />)}</div>
         )}
-        <Chats a={a} now={now} />
+        <Chats a={a} />
         <div className="mt-auto flex min-h-[92px] flex-col justify-end">
           {a.stale && <p className="px-1 text-[11px] leading-relaxed text-subtle-fg">Last read {new Date(a.fetchedAt).toLocaleString()} · {a.staleMessage}</p>}
           {loginButton}
