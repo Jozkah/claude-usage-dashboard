@@ -72,6 +72,21 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
   return { toWork, toPersonal, conflicts };
 }
 
+export function syncDesktopSessionRecordsMany(profiles, options = {}) {
+  const ids = Object.keys(profiles);
+  const copied = Object.fromEntries(ids.map((id) => [id, 0]));
+  let conflicts = 0;
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const result = syncDesktopSessionRecords(profiles[ids[i]], profiles[ids[j]], options);
+      copied[ids[j]] += result.toWork;
+      copied[ids[i]] += result.toPersonal;
+      conflicts += result.conflicts;
+    }
+  }
+  return { copied, conflicts };
+}
+
 // Call only after both Desktop profiles exit. Live Desktop workers can rewrite
 // these pointers from memory, including stale empty records.
 function checkedOutBranch(worktreePath) {
@@ -265,7 +280,21 @@ export function findWindowsDesktopProfiles(local = process.env.LOCALAPPDATA || p
     const work = fs.existsSync(path.join(legacyWork, 'claude-code-sessions'))
       ? legacyWork : currentWork;
     if (fs.existsSync(path.join(personal, 'claude-code-sessions')) && fs.existsSync(path.join(work, 'claude-code-sessions'))) {
-      return { personal, work };
+      const profiles = { personal, work };
+      const addExtras = (directory) => {
+        if (!fs.existsSync(directory)) return;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          if (!entry.isDirectory() || entry.name.toLowerCase() === 'work') continue;
+          const id = entry.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          const profile = path.join(directory, entry.name);
+          if (!id || Object.hasOwn(profiles, id)) continue;
+          try { sessionLeaves(profile); profiles[id] = profile; }
+          catch { /* Profile has no local Code sessions yet. */ }
+        }
+      };
+      addExtras(path.join(root, 'Local', 'ClaudeProfiles'));
+      addExtras(path.join(local, 'ClaudeProfiles'));
+      return profiles;
     }
   }
   throw new Error('Personal and Work Claude Desktop profiles were not found.');

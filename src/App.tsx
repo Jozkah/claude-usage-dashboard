@@ -231,14 +231,14 @@ export default function App() {
               <button role="menuitem" className="mt-3 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncChats(contextAccount.account)}>
                 Share Personal CLI chats with {contextAccount.account.name}
               </button>
+              <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncDesktop()}>
+                Sync local Desktop chats across profiles
+              </button>
+              <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncLabels()}>
+                Sync Desktop chat names and groups
+              </button>
               {contextAccount.account.id === 'work' && (
                 <>
-                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncDesktop()}>
-                    Sync local Desktop chats both ways
-                  </button>
-                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncLabels()}>
-                    Sync Desktop chat names and groups
-                  </button>
                   <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncPlugins()}>
                     Copy local Code plugins and skills to Work
                   </button>

@@ -42,16 +42,17 @@ export async function shareLocalChats(sourceId: string, targetId: string): Promi
 
 export async function syncDesktopChats(): Promise<string> {
   const res = await fetch('/api/chats/sync-desktop', { method: 'POST' });
-  const result = (await res.json()) as { error?: string; toWork?: number; toPersonal?: number; conflicts?: number };
+  const result = (await res.json()) as { error?: string; copied?: Record<string, number>; conflicts?: number };
   if (!res.ok) throw new Error(result.error || 'Could not sync Desktop sessions.');
-  return `Synced ${result.toWork ?? 0} chats to Work, ${result.toPersonal ?? 0} to Personal. ${result.conflicts ?? 0} differing records left untouched. New chats sync automatically while dashboard server runs. If Recents does not update, reopen Claude Desktop. Earlier private thinking cannot transfer between organizations.`;
+  const counts = Object.entries(result.copied ?? {}).map(([name, count]) => `${count} to ${name}`).join(', ');
+  return `Synced ${counts || '0 chats'}. ${result.conflicts ?? 0} differing records left untouched. New local Code chats copy while dashboard runs. Open Desktop panes may need reopening to refresh. Earlier private thinking cannot transfer between organizations.`;
 }
 
 export async function syncDesktopLabels(): Promise<string> {
   const res = await fetch('/api/chats/sync-labels', { method: 'POST' });
   const result = (await res.json()) as { error?: string; titles?: number; groups?: number; assignments?: number };
   if (!res.ok) throw new Error(result.error || 'Could not sync Desktop names and groups.');
-  return `Synced ${result.titles ?? 0} chat names, ${result.groups ?? 0} groups, ${result.assignments ?? 0} group assignments. Reopen both Claude Desktop profiles to refresh their sidebars.`;
+  return `Synced ${result.titles ?? 0} chat names, ${result.groups ?? 0} groups, ${result.assignments ?? 0} group assignments. Reopen Claude Desktop profiles to refresh their sidebars.`;
 }
 
 export async function syncCodeSetup(): Promise<string> {

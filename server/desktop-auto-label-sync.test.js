@@ -25,6 +25,19 @@ test('refuses conflicting category assignments for same chat', () => {
   assert.throws(() => mergeDesktopLabelSnapshots(personal, work), /Conflicting group/);
 });
 
+test('merges third profile without losing nested chat order', () => {
+  const a = { groups: [{ id: 'a', name: 'Project' }], assignments: [['code:parent', 'a']],
+    order: [['a', ['code:parent']]], manuals: [{ id: 'a', name: 'Project', members: ['code:parent'] }] };
+  const b = { groups: [{ id: 'b', name: 'Project' }], assignments: [['code:child', 'b']],
+    order: [['b', ['code:parent', 'code:child']]], manuals: [{ id: 'b', name: 'Project', members: ['code:child'] }] };
+  const c = { groups: [{ id: 'c', name: 'Project' }], assignments: [['code:third', 'c']],
+    order: [['c', ['code:child', 'code:third']]], manuals: [{ id: 'c', name: 'Project', members: ['code:third'] }] };
+  const merged = mergeDesktopLabelSnapshots(a, b, c);
+  assert.deepEqual(merged.assignments, [['code:child', 'a'], ['code:parent', 'a'], ['code:third', 'a']]);
+  assert.deepEqual(merged.order, [['a', ['code:parent', 'code:child', 'code:third']]]);
+  assert.deepEqual(merged.manuals[0].members, ['code:parent', 'code:child', 'code:third']);
+});
+
 test('initializes only from matching profiles', () => {
   assert.equal(chooseAutomaticLabelSource({ personal: 'a', work: 'a' }, null), 'personal');
   assert.equal(chooseAutomaticLabelSource({ personal: 'a', work: 'b' }, null), null);

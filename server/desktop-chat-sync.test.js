@@ -4,7 +4,38 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+
+test('copies nested parent and child records across three profiles', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-three-profiles-'));
+  try {
+    const profiles = Object.fromEntries(['personal', 'work', 'third'].map((name) => {
+      const folder = path.join(root, name);
+      fs.mkdirSync(path.join(folder, 'claude-code-sessions', name, 'device'), { recursive: true });
+      return [name, folder];
+    }));
+    const leaf = (name) => path.join(profiles[name], 'claude-code-sessions', name, 'device');
+    const parent = 'local_11111111-1111-4111-8111-111111111111';
+    const child = 'local_22222222-2222-4222-8222-222222222222';
+    fs.writeFileSync(path.join(leaf('personal'), `${parent}.json`), JSON.stringify({
+      sessionId: parent, title: 'Parent', completedTurns: 2,
+    }));
+    fs.writeFileSync(path.join(leaf('third'), `${child}.json`), JSON.stringify({
+      sessionId: child, forkedFromSessionId: parent, title: 'Child', completedTurns: 1,
+    }));
+    const result = syncDesktopSessionRecordsMany(profiles);
+    assert.equal(result.copied.work, 2);
+    assert.equal(result.copied.personal, 1);
+    assert.equal(result.copied.third, 1);
+    for (const name of Object.keys(profiles)) {
+      const childRecord = JSON.parse(fs.readFileSync(path.join(leaf(name), `${child}.json`)));
+      assert.equal(childRecord.forkedFromSessionId, parent);
+      assert.ok(fs.existsSync(path.join(leaf(name), `${parent}.json`)));
+    }
+    assert.deepEqual(syncDesktopSessionRecordsMany(profiles).copied,
+      { personal: 0, work: 0, third: 0 });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('repairs newer full transcript pointer into closed Personal profile without losing backup', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-stale-'));
@@ -63,6 +94,21 @@ test('discovers migrated Personal profile and existing Work profile', () => {
     fs.mkdirSync(path.join(personal, 'claude-code-sessions'), { recursive: true });
     fs.mkdirSync(path.join(work, 'claude-code-sessions'), { recursive: true });
     assert.deepEqual(findWindowsDesktopProfiles(local), { personal, work });
+  } finally { fs.rmSync(local, { recursive: true, force: true }); }
+});
+
+test('discovers additional isolated Desktop profiles', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-extra-profile-'));
+  try {
+    const root = path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache');
+    const personal = path.join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc');
+    const work = path.join(root, 'Local', 'ClaudeProfiles', 'Work');
+    const third = path.join(local, 'ClaudeProfiles', 'Third');
+    for (const profile of [personal, work, third]) {
+      fs.mkdirSync(path.join(profile, 'claude-code-sessions'), { recursive: true });
+    }
+    fs.mkdirSync(path.join(third, 'claude-code-sessions', 'third-account', 'device'), { recursive: true });
+    assert.deepEqual(findWindowsDesktopProfiles(local), { personal, work, third });
   } finally { fs.rmSync(local, { recursive: true, force: true }); }
 });
 

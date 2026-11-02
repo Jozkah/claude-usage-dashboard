@@ -28,11 +28,11 @@ export function chooseInitialLabelSource(personal, work) {
   return null;
 }
 
-export function mergeDesktopLabelSnapshots(personal, work) {
+export function mergeDesktopLabelSnapshots(...snapshots) {
   const groups = [];
   const canonicalByName = new Map();
   const idMaps = [];
-  for (const snapshot of [personal, work]) {
+  for (const snapshot of snapshots) {
     const ids = new Map();
     for (const group of snapshot.groups) {
       const key = group.name.toLocaleLowerCase();
@@ -49,7 +49,7 @@ export function mergeDesktopLabelSnapshots(personal, work) {
   const assignments = new Map();
   const order = new Map(groups.map((group) => [group.id, []]));
   const manualById = new Map();
-  for (const [index, snapshot] of [personal, work].entries()) {
+  for (const [index, snapshot] of snapshots.entries()) {
     const ids = idMaps[index];
     for (const [chat, groupId] of snapshot.assignments) {
       const canonical = ids.get(groupId);

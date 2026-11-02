@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClassicLevel } from 'classic-level';
-import { syncDesktopLabels, syncMergedDesktopLabels, desktopLabelFingerprint } from './desktop-label-sync.js';
+import { syncDesktopLabels, syncMergedDesktopLabels, syncMergedDesktopLabelsMany, desktopLabelFingerprint } from './desktop-label-sync.js';
 
 test('merges independent Desktop categories into both closed profiles', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-merge-'));
@@ -15,7 +15,7 @@ test('merges independent Desktop categories into both closed profiles', async ()
       const scope = `${name}-scope`;
       const leaf = path.join(profile, 'claude-code-sessions', scope, 'device');
       fs.mkdirSync(leaf, { recursive: true });
-      for (const id of ['a', 'b', 'c']) fs.writeFileSync(path.join(leaf, `local_${id}.json`),
+      for (const id of ['a', 'b', 'c', 'd']) fs.writeFileSync(path.join(leaf, `local_${id}.json`),
         JSON.stringify({ sessionId: `local_${id}`, title: id }));
       const state = { groups, assignments, order: {} };
       const sections = [{ id: 'pinned', kind: 'pinned', order: 0 },
@@ -56,6 +56,31 @@ test('merges independent Desktop categories into both closed profiles', async ()
         'code:local_b': 'trip-p', 'code:local_c': 'gaming' });
     }
     assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(work));
+    const third = await setup('third', [{ id: 'third-project', name: 'Third project' }],
+      { 'code:local_c': 'third-project' });
+    await assert.rejects(syncMergedDesktopLabelsMany({ personal, work, third }), /Conflicting group assignment/);
+    const thirdConfigPath = path.join(third, 'claude_desktop_config.json');
+    const thirdConfig = JSON.parse(fs.readFileSync(thirdConfigPath, 'utf8'));
+    const thirdState = thirdConfig.preferences.epitaxyPrefs['dframe-group-scopes']['third-scope'];
+    thirdState.assignments = { 'code:local_d': 'third-project' };
+    fs.writeFileSync(thirdConfigPath, JSON.stringify(thirdConfig));
+    const thirdTitlePath = path.join(third, 'claude-code-sessions', 'third-scope', 'device', 'local_a.json');
+    fs.writeFileSync(thirdTitlePath, JSON.stringify({ sessionId: 'local_a', title: 'Shared title' }));
+    fs.utimesSync(thirdTitlePath, new Date('2030-01-01'), new Date('2030-01-01'));
+    await syncMergedDesktopLabelsMany({ personal, work, third });
+    assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(third));
+    assert.equal(desktopLabelFingerprint(work), desktopLabelFingerprint(third));
+    for (const profile of [personal, work, third]) {
+      const titlePath = path.join(profile, 'claude-code-sessions', `${path.basename(profile)}-scope`, 'device', 'local_a.json');
+      assert.equal(JSON.parse(fs.readFileSync(titlePath, 'utf8')).title, 'Shared title');
+    }
+    const workTitlePath = path.join(work, 'claude-code-sessions', 'work-scope', 'device', 'local_a.json');
+    fs.writeFileSync(workTitlePath, JSON.stringify({ sessionId: 'local_a', title: 'Renamed in Work' }));
+    fs.utimesSync(workTitlePath, new Date('2031-01-01'), new Date('2031-01-01'));
+    await syncMergedDesktopLabelsMany({ personal, work, third }, { targetIds: ['third'] });
+    assert.equal(JSON.parse(fs.readFileSync(thirdTitlePath, 'utf8')).title, 'Renamed in Work');
+    const personalTitlePath = path.join(personal, 'claude-code-sessions', 'personal-scope', 'device', 'local_a.json');
+    assert.equal(JSON.parse(fs.readFileSync(personalTitlePath, 'utf8')).title, 'Shared title');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

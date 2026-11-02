@@ -24,13 +24,13 @@ try {
       }
       if (-not (Test-Path -LiteralPath $dependency)) {
         Write-WatchLog 'Installing dashboard dependencies.'
-        Push-Location $root
-        try {
-          & $npm ci --prefer-offline --no-audit --no-fund *> (Join-Path $root 'data\dashboard-install.log')
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $dependency)) {
-            throw "npm ci failed with exit code $LASTEXITCODE."
-          }
-        } finally { Pop-Location }
+        $install = Start-Process -FilePath $npm -ArgumentList 'install', '--prefer-offline', '--no-audit', '--no-fund' `
+          -WorkingDirectory $root -WindowStyle Hidden -Wait -PassThru `
+          -RedirectStandardOutput (Join-Path $root 'data\dashboard-install.log') `
+          -RedirectStandardError (Join-Path $root 'data\dashboard-install-error.log')
+        if ($install.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dependency)) {
+          throw "npm install failed with exit code $($install.ExitCode)."
+        }
       }
       try {
         $response = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:4777/api/chats/sync-status' -TimeoutSec 4

@@ -138,8 +138,9 @@ function writeWithBackup(filename, value) {
   } finally { fs.rmSync(temp, { force: true }); }
 }
 
-function syncDesktopTitles(profiles) {
+function syncDesktopTitles(profiles, targets = profiles) {
   let titles = 0;
+  const targetFiles = new Set(targets.flatMap((profile) => [...profile.records.values()].map((record) => record.filename)));
   const byId = new Map();
   for (const profile of profiles) {
     for (const record of profile.records.values()) {
@@ -152,11 +153,12 @@ function syncDesktopTitles(profiles) {
   }
   for (const peerSet of byId.values()) {
     const peers = [...peerSet];
-    if (peers.length !== 2) continue;
+    if (peers.length < 2) continue;
     const named = peers.filter((record) => typeof record.value.title === 'string' && record.value.title);
     if (!named.length) continue;
     const newest = named.sort((a, b) => b.mtime - a.mtime)[0];
     for (const record of peers) {
+      if (!targetFiles.has(record.filename)) continue;
       if (record.value.title === newest.value.title) continue;
       record.value.title = newest.value.title;
       writeWithBackup(record.filename, record.value);
@@ -226,15 +228,24 @@ export async function syncDesktopLabels(personalProfile, workProfile, options = 
 
 export async function syncMergedDesktopLabels(personalProfile, workProfile, { targetProfile = 'both' } = {}) {
   if (!['personal', 'work', 'both'].includes(targetProfile)) throw new Error(`Invalid target profile: ${targetProfile}`);
+  return syncMergedDesktopLabelsMany({ personal: personalProfile, work: workProfile }, {
+    targetIds: targetProfile === 'both' ? ['personal', 'work'] : [targetProfile],
+  });
+}
+
+export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object.keys(profiles) } = {}) {
+  const ids = Object.keys(profiles);
+  if (ids.length < 2 || targetIds.some((id) => !Object.hasOwn(profiles, id))) {
+    throw new Error('Choose at least two Desktop profiles and valid target IDs.');
+  }
   const merged = mergeDesktopLabelSnapshots(
-    desktopLabelSnapshot(personalProfile), desktopLabelSnapshot(workProfile));
-  const titles = targetProfile === 'both'
-    ? syncDesktopTitles([readProfile(personalProfile), readProfile(workProfile)]) : 0;
+    ...ids.map((id) => desktopLabelSnapshot(profiles[id])));
+  const loaded = Object.fromEntries(ids.map((id) => [id, readProfile(profiles[id])]));
+  const titles = syncDesktopTitles(Object.values(loaded), targetIds.map((id) => loaded[id]));
   let updated = 0;
-  const targets = targetProfile === 'both' ? [personalProfile, workProfile]
-    : [targetProfile === 'personal' ? personalProfile : workProfile];
-  for (const profilePath of targets) {
-    const profile = readProfile(profilePath);
+  for (const id of targetIds) {
+    const profilePath = profiles[id];
+    const profile = loaded[id];
     const bySessionId = new Map();
     for (const [key, record] of profile.records) bySessionId.set(record.value.sessionId, key);
     const translate = (key) => {

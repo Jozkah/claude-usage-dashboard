@@ -20,9 +20,9 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { shareLocalChats } from './chat-sharing.js';
-import { findWindowsDesktopProfiles, syncDesktopSessionRecords, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
-import { syncDesktopLabels, syncMergedDesktopLabels, desktopLabelFingerprint, desktopLabelSnapshot } from './desktop-label-sync.js';
-import { chooseAutomaticLabelSource, chooseInitialLabelSource } from './desktop-auto-label-sync.js';
+import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
+import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,51 +42,29 @@ const ALLOWED_HOSTS = new Set([
 const CONFIG_FILE = path.join(DATA_DIR, '.claude-usage-dashboard.json');
 const HISTORY_FILE = path.join(DATA_DIR, '.claude-usage-history.json');
 const USAGE_SNAPSHOT_FILE = path.join(DATA_DIR, '.claude-usage-latest.json');
-const LABEL_BASELINE_FILE = path.join(DATA_DIR, '.claude-usage-label-baseline.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
 const DESKTOP_SYNC_MS = 10 * 1000;
 const DESKTOP_AUTO_SYNC = process.platform === 'win32' && !MOCK && !ACCOUNTS_DIR && process.env.DESKTOP_AUTO_SYNC !== '0';
-let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, toWork: 0, toPersonal: 0, repaired: 0, branchesAligned: 0 };
+let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, copied: {}, repaired: 0, branchesAligned: 0 };
 let labelSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, waiting: false };
 let labelSyncBusy = false;
 
-function desktopProfileState() {
-  const counts = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    "$items = @(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | Where-Object { $_.ExecutablePath -like \"*\\WindowsApps\\Claude_*\" -or $_.ExecutablePath -like \"*\\ClaudePortableWork\\*\" }); " +
-    '$work = @($items | Where-Object { $_.CommandLine -like "*ClaudeProfiles\\Work*" }).Count; ' +
-    '$personal = @($items | Where-Object { $_.CommandLine -notlike "*ClaudeProfiles\\Work*" }).Count; ' +
-    '"$personal,$work"'], { encoding: 'utf8', timeout: 10000 }).trim().split(',').map(Number);
-  if (counts.length !== 2 || counts.some((count) => !Number.isInteger(count) || count < 0)) {
-    throw new Error('Could not check Claude Desktop processes.');
-  }
-  return { personal: counts[0] > 0, work: counts[1] > 0 };
+function desktopProfileState(profiles = findWindowsDesktopProfiles()) {
+  const script = "@(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | " +
+    "Where-Object { $_.CommandLine -notmatch '--type=' } | " +
+    'Select-Object ExecutablePath,CommandLine) | ConvertTo-Json -Compress';
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8', timeout: 10000 }).trim();
+  const processes = output ? JSON.parse(output) : [];
+  return parseDesktopProcessState(profiles, Array.isArray(processes) ? processes : [processes]);
 }
 
 function desktopRunning() {
   const state = desktopProfileState();
-  return state.personal || state.work;
+  return Object.values(state).some(Boolean);
 }
 
-function readLabelBaseline() {
-  try {
-    const state = JSON.parse(fs.readFileSync(LABEL_BASELINE_FILE, 'utf8'));
-    if (typeof state.personal === 'string' && typeof state.work === 'string') return state;
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  return null;
-}
-
-function labelFingerprints(profiles) {
-  return { personal: desktopLabelFingerprint(profiles.personal), work: desktopLabelFingerprint(profiles.work) };
-}
-
-function saveLabelBaseline(profiles) {
-  const temp = `${LABEL_BASELINE_FILE}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(temp, JSON.stringify(labelFingerprints(profiles)));
-    fs.renameSync(temp, LABEL_BASELINE_FILE);
-  } finally { fs.rmSync(temp, { force: true }); }
-}
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
@@ -541,16 +519,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-desktop') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop chat sync requires a direct installation.' });
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
-      const accounts = loadAccounts();
-      const personal = accounts.find((account) => account.id === 'personal');
-      const work = accounts.find((account) => account.id === 'work');
-      if (!personal || !work) return sendJson(res, 400, { error: 'Personal and Work accounts are required.' });
       try {
-        shareLocalChats(expandHome(personal.configDir), expandHome(work.configDir));
         const profiles = findWindowsDesktopProfiles();
-        const result = syncDesktopSessionRecords(profiles.personal, profiles.work);
+        const result = syncDesktopSessionRecordsMany(profiles);
+        const copied = { ...desktopSyncStatus.copied };
+        for (const [id, count] of Object.entries(result.copied)) copied[id] = (copied[id] || 0) + count;
         desktopSyncStatus = { ...desktopSyncStatus, lastRun: Date.now(), lastError: null,
-          toWork: desktopSyncStatus.toWork + result.toWork, toPersonal: desktopSyncStatus.toPersonal + result.toPersonal };
+          copied };
         return sendJson(res, 200, result);
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
@@ -565,12 +540,11 @@ const server = http.createServer(async (req, res) => {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop label sync requires a direct installation.' });
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
       try {
-        if (desktopRunning()) return sendJson(res, 409, { error: 'Fully quit both Claude Desktop instances, including tray icons, then retry.' });
+        if (desktopRunning()) return sendJson(res, 409, { error: 'Fully quit every Claude Desktop instance, including tray icons, then retry.' });
         if (labelSyncBusy) return sendJson(res, 409, { error: 'Desktop label sync is already running.' });
         labelSyncBusy = true;
         const profiles = findWindowsDesktopProfiles();
-        const result = await syncDesktopLabels(profiles.personal, profiles.work);
-        saveLabelBaseline(profiles);
+        const result = await syncMergedDesktopLabelsMany(profiles);
         labelSyncStatus = { ...labelSyncStatus, lastRun: Date.now(), lastError: null };
         return sendJson(res, 200, result);
       } catch (error) {
@@ -652,14 +626,14 @@ server.listen(PORT, HOST, () => {
 if (DESKTOP_AUTO_SYNC) {
   const syncNewDesktopRecords = () => {
     try {
-      const accounts = loadAccounts();
-      if (!accounts.some((account) => account.id === 'personal') || !accounts.some((account) => account.id === 'work')) return;
       const profiles = findWindowsDesktopProfiles();
-      const result = syncDesktopSessionRecords(profiles.personal, profiles.work,
+      const result = syncDesktopSessionRecordsMany(profiles,
         { minAgeMs: 2000, inspectConflicts: false });
+      const copied = { ...desktopSyncStatus.copied };
+      for (const [id, count] of Object.entries(result.copied)) copied[id] = (copied[id] || 0) + count;
       desktopSyncStatus = { ...desktopSyncStatus, enabled: true, lastRun: Date.now(), lastError: null,
-        toWork: desktopSyncStatus.toWork + result.toWork, toPersonal: desktopSyncStatus.toPersonal + result.toPersonal };
-      if (result.toWork || result.toPersonal) console.log(`Desktop chats: ${result.toWork} to Work, ${result.toPersonal} to Personal`);
+        copied };
+      if (Object.values(result.copied).some(Boolean)) console.log(`Desktop chats: ${JSON.stringify(result.copied)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message !== desktopSyncStatus.lastError) console.warn(`Desktop chat sync: ${message}`);
@@ -670,69 +644,57 @@ if (DESKTOP_AUTO_SYNC) {
   setInterval(syncNewDesktopRecords, DESKTOP_SYNC_MS).unref();
 
   let closedChecks = 0;
-  const profileClosedChecks = { personal: 0, work: 0 };
-  const repairedDuringClosure = { personal: false, work: false };
-  const labelsSyncedDuringClosure = { personal: false, work: false };
+  const profileClosedChecks = {};
   let syncedDuringClosure = false;
   const syncClosedDesktopLabels = async () => {
     if (labelSyncBusy) return;
     try {
-      const running = desktopProfileState();
-      for (const profile of ['personal', 'work']) {
+      const profiles = findWindowsDesktopProfiles();
+      const ids = Object.keys(profiles);
+      const running = desktopProfileState(profiles);
+      for (const profile of ids) {
         if (running[profile]) {
           profileClosedChecks[profile] = 0;
-          repairedDuringClosure[profile] = false;
-          labelsSyncedDuringClosure[profile] = false;
-        } else profileClosedChecks[profile]++;
+        } else profileClosedChecks[profile] = (profileClosedChecks[profile] || 0) + 1;
       }
-      for (const profile of ['personal', 'work']) {
-        if (profileClosedChecks[profile] < 2 || repairedDuringClosure[profile]) continue;
-        const profiles = findWindowsDesktopProfiles();
-        const repaired = repairEmptyDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
-        const staleRepaired = repairStaleDesktopSessionRecords(profiles.personal, profiles.work, { targetProfile: profile });
-        const reconciled = profile === 'work' ? reconcileWorkSessionRecords(profiles.personal, profiles.work) : 0;
+      for (const profile of ids) {
+        if (profileClosedChecks[profile] < 2) continue;
+        let repaired = 0;
+        let staleRepaired = 0;
+        for (const source of ids.filter((id) => id !== profile)) {
+          repaired += repairEmptyDesktopSessionRecords(profiles[source], profiles[profile], { targetProfile: 'work' });
+          staleRepaired += repairStaleDesktopSessionRecords(profiles[source], profiles[profile], { targetProfile: 'work' });
+        }
+        const reconciled = profile !== 'personal'
+          ? reconcileWorkSessionRecords(profiles.personal, profiles[profile]) : 0;
         const branchesAligned = alignDesktopSessionBranches(profiles[profile]);
         desktopSyncStatus = { ...desktopSyncStatus, repaired: desktopSyncStatus.repaired + repaired + staleRepaired,
           branchesAligned: desktopSyncStatus.branchesAligned + branchesAligned };
-        repairedDuringClosure[profile] = true;
         if (repaired || staleRepaired || reconciled || branchesAligned) console.log(`Desktop ${profile}: repaired ${repaired} empty chats, ${staleRepaired} stale chats, reconciled ${reconciled} chats, aligned ${branchesAligned} branches`);
       }
-      if (running.personal !== running.work) {
-        const targetProfile = running.personal ? 'work' : 'personal';
-        if (profileClosedChecks[targetProfile] >= 2 && !labelsSyncedDuringClosure[targetProfile]) {
-          labelSyncBusy = true;
-          const profiles = findWindowsDesktopProfiles();
-          const result = await syncMergedDesktopLabels(profiles.personal, profiles.work, { targetProfile });
-          labelsSyncedDuringClosure[targetProfile] = true;
-          labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
-          if (result.updated) console.log(`Desktop ${targetProfile}: synced ${result.groups} groups, ${result.assignments} assignments`);
-        }
-      }
-      if (running.personal || running.work) {
+      const open = ids.filter((id) => running[id]);
+      if (open.length) {
         closedChecks = 0;
         syncedDuringClosure = false;
-        labelSyncStatus = { ...labelSyncStatus, waiting: !labelsSyncedDuringClosure[running.personal ? 'work' : 'personal'] };
+        const targets = ids.filter((id) => !running[id] && profileClosedChecks[id] >= 2);
+        if (targets.length) {
+          labelSyncBusy = true;
+          const result = await syncMergedDesktopLabelsMany(profiles, { targetIds: targets });
+          labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: true };
+          if (result.updated) console.log(`Desktop labels: synced ${targets.join(', ')}`);
+        } else labelSyncStatus = { ...labelSyncStatus, waiting: true };
         return;
       }
       if (++closedChecks < 2 || syncedDuringClosure) return;
       labelSyncBusy = true;
-      const profiles = findWindowsDesktopProfiles();
-      const current = labelFingerprints(profiles);
-      const baseline = readLabelBaseline();
-      const source = baseline ? chooseAutomaticLabelSource(current, baseline)
-        : chooseInitialLabelSource(desktopLabelSnapshot(profiles.personal), desktopLabelSnapshot(profiles.work));
-      const result = source
-        ? await syncDesktopLabels(profiles.personal, profiles.work, { source })
-        : await syncMergedDesktopLabels(profiles.personal, profiles.work);
-      saveLabelBaseline(profiles);
+      const result = await syncMergedDesktopLabelsMany(profiles);
       labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
-      syncedDuringClosure = true;
+      if (!Object.values(desktopProfileState(findWindowsDesktopProfiles())).some(Boolean)) syncedDuringClosure = true;
       if (result.titles || result.groups) console.log(`Desktop labels: ${result.titles} titles, ${result.groups} groups, ${result.assignments} assignments`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message !== labelSyncStatus.lastError) console.warn(`Desktop label sync: ${message}`);
       labelSyncStatus = { ...labelSyncStatus, lastError: message, waiting: false };
-      syncedDuringClosure = true;
     } finally { labelSyncBusy = false; }
   };
   setInterval(syncClosedDesktopLabels, 30_000).unref();
