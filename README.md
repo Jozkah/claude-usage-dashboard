@@ -34,6 +34,7 @@ npm start          # http://localhost:4777
 ```
 
 On Windows, run `scripts/start-dashboard.vbs` to start the production server without a console window. To launch it at sign-in, add a shortcut to this file in your user's Startup folder after running `npm run build`. The launcher keeps the browser closed; open <http://localhost:4777> when needed.
+Use `scripts/open-dashboard.vbs` for a Desktop shortcut that starts the server, waits until it is ready, and opens the dashboard in your browser.
 
 ## Run it in Docker
 
