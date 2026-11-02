@@ -482,7 +482,8 @@ const server = http.createServer(async (req, res) => {
       const accounts = loadAccounts();
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
       // sessions are read fresh on every request (cheap, local), usage is cached
-      const list = statuses.map((v, i) => ({ ...v, sessions: MOCK ? [] : readSessions(expandHome(accounts[i].configDir)) }));
+      const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir,
+        sessions: MOCK ? [] : readSessions(expandHome(accounts[i].configDir)) }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
 
