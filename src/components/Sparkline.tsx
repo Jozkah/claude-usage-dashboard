@@ -10,7 +10,7 @@ interface Props {
 export function Sparkline({ values, color, height = 40 }: Props) {
   const id = useId().replace(/:/g, '');
   if (values.length < 2) {
-    return <div className="h-10 w-full rounded-md border border-dashed border-line opacity-60" style={{ height }} />;
+    return <div className="flex w-full items-center text-xs text-subtle-fg" style={{ height }}>Trend needs more recent readings</div>;
   }
   const W = 100;
   const H = 32;

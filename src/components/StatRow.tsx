@@ -1,6 +1,7 @@
 import { Clock, Flame, Trophy, Users } from 'lucide-react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, fmtDur, headroom, levelFor } from '../lib/format';
+import { nextReset } from '../lib/reset';
 import { useHistory } from '../lib/api';
 import { AnimatedNumber } from './AnimatedNumber';
 import { FrameCard } from './FrameCard';
@@ -30,13 +31,11 @@ export function StatRow({ accounts, now, tick }: Props) {
   for (const a of ok) for (const w of a.windows ?? []) if (!tight || w.used > tight.w.used) tight = { acc: a, w };
 
   // soonest reset
-  let next: { acc: Account; w: UsageWindow; at: number } | null = null;
+  let next: { acc: Account; w: UsageWindow; at: number; estimated: boolean } | null = null;
   for (const a of ok) {
-    if (a.stale) continue;
     for (const w of a.windows ?? []) {
-      if (!w.resetsAt) continue;
-      const at = new Date(w.resetsAt).getTime();
-      if (at > now && (!next || at < next.at)) next = { acc: a, w, at };
+      const reset = nextReset(w, now, a.stale);
+      if (reset && (!next || reset.at < next.at)) next = { acc: a, w, ...reset };
     }
   }
 
@@ -78,7 +77,7 @@ export function StatRow({ accounts, now, tick }: Props) {
             <div className="mt-2 text-xs text-muted-fg">
               {best ? (
                 <>
-                  <span className="font-medium text-good"><AnimatedNumber value={headroom(best)} />% left</span> on its tightest limit
+                  <span className="font-medium text-good"><AnimatedNumber value={headroom(best)} />% left</span> on its tightest limit{best.stale ? ' · last recorded' : ''}
                 </>
               ) : 'No data yet'}
             </div>
@@ -93,7 +92,7 @@ export function StatRow({ accounts, now, tick }: Props) {
             <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: tightColor }}>
               {tight ? <AnimatedNumber value={tight.w.used} suffix="%" /> : '—'}
             </div>
-            <div className="mt-2 truncate text-xs text-muted-fg">{tight ? `${tight.acc.name} · ${tight.w.label}` : 'No data yet'}</div>
+            <div className="mt-2 truncate text-xs text-muted-fg">{tight ? `${tight.acc.name} · ${tight.w.label}${tight.acc.stale ? ' · last recorded' : ''}` : 'No data yet'}</div>
           </div>
           <Sparkline values={tightHist.points.map((p) => p[1])} color={tightColor} />
         </Body>
@@ -103,9 +102,10 @@ export function StatRow({ accounts, now, tick }: Props) {
         <Body>
           <div>
             <div className="text-[32px] leading-none font-semibold tracking-tight tabular-nums">{next ? fmtDur(next.at - now) : '—'}</div>
-            <div className="mt-2 truncate text-xs text-muted-fg">{next ? `${next.acc.name} · ${next.w.label}` : 'No upcoming reset'}</div>
+            <div className="mt-2 truncate text-xs text-muted-fg">{next ? `${next.acc.name} · ${next.w.label}${next.estimated ? ' · estimated' : ''}` : 'Reset time unavailable'}</div>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-frame">
+          {next ? <div className="text-[11px] text-subtle-fg">Reset window elapsed</div> : null}
+          {next ? <div className="h-1.5 overflow-hidden rounded-full bg-frame">
             {next && (
               <div
                 className="h-full rounded-full bg-primary"
@@ -115,7 +115,7 @@ export function StatRow({ accounts, now, tick }: Props) {
                 }}
               />
             )}
-          </div>
+          </div> : <div className="text-xs text-subtle-fg">Waiting for fresh reset data</div>}
         </Body>
       </FrameCard>
     </div>
