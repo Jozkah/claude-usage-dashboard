@@ -19,6 +19,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
+import { visibleUsageWindows } from './plan-limits.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
@@ -387,12 +388,14 @@ async function getStatus(acc, index, force) {
   if (hit && bo && Date.now() < bo.until && !(force && age > 30 * 1000)) return hit.value;
 
   let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
+  if (value.windows) value = { ...value, windows: visibleUsageWindows(value.plan, value.windows) };
   if (value.status === 'ok') {
     backoff.delete(acc.id);
     recordHistory(acc.id, value.windows);
     latestUsage?.remember(acc, value);
   } else if (latestUsage) {
     value = latestUsage.fallback(acc, value);
+    if (value.windows) value = { ...value, windows: visibleUsageWindows(value.plan, value.windows) };
   }
   cache.set(acc.id, { at: Date.now(), value });
   return value;

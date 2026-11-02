@@ -39,7 +39,7 @@ export function StatRow({ accounts, now, tick }: Props) {
     }
   }
 
-  const bestHist = useHistory(best?.id, 'five_hour', '24h', tick);
+  const bestHist = useHistory(best?.id, best?.windows?.[0]?.key, best?.windows?.[0]?.key.startsWith('seven_day') ? '7d' : '24h', tick);
   const tightHist = useHistory(tight?.acc.id, tight?.w.key, '24h', tick);
 
   const tightColor = tight ? colorVar(levelFor(tight.w.used)) : 'var(--subtle-fg)';
