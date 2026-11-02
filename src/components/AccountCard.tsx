@@ -150,6 +150,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   const main = mainWindows(a);
   const rest = a.windows.filter((w) => !main.includes(w));
   const critical = a.windows.some((w) => w.used >= 90);
+  const weeklyPending = /^Team$/i.test(a.plan ?? '') && !a.windows.some((w) => w.key === 'seven_day');
 
   return (
     <FrameCard
@@ -162,8 +163,13 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
       onContextMenu={onContextMenu}
     >
       <div className="flex min-w-0 flex-1 flex-col p-3">
-        <div className={`grid gap-3 ${main.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        <div className={`grid gap-3 ${main.length === 1 && !weeklyPending ? 'grid-cols-1' : 'grid-cols-2'}`}>
           {main.map((w) => <Gauge key={w.key} w={w} now={now} account={a} />)}
+          {weeklyPending && <div className="flex h-[300px] min-w-0 flex-col rounded-lg bg-frame/70 px-2 py-4 text-center">
+            <div className="mb-3 text-[13px] font-medium">Weekly · all models</div>
+            <div className="m-auto max-w-36 text-xs leading-relaxed text-subtle-fg">Awaiting fresh usage reading</div>
+            <div className="mt-auto text-[11.5px] text-subtle-fg">{needsLogin ? 'Sign in to check weekly limit' : 'Checked with next usage update'}</div>
+          </div>}
         </div>
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} account={a} />)}</div>
