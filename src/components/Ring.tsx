@@ -7,10 +7,11 @@ interface Props {
   /** 0..1 share of the window already passed; drawn as a thin inner ring. */
   elapsed: number | null;
   size?: number;
+  stale?: boolean;
 }
 
 /** Animated gauge: outer ring = usage, thin inner ring = time already elapsed. */
-export function Ring({ used, elapsed, size = 132 }: Props) {
+export function Ring({ used, elapsed, size = 132, stale = false }: Props) {
   const [on, setOn] = useState(false);
   useEffect(() => {
     const id = requestAnimationFrame(() => setOn(true));
@@ -36,7 +37,8 @@ export function Ring({ used, elapsed, size = 132 }: Props) {
           style={{
             stroke: color,
             transition: 'stroke-dashoffset 1.2s var(--ease-out-expo), stroke 0.4s',
-            filter: `drop-shadow(0 0 6px color-mix(in srgb, ${color} 35%, transparent))`,
+            opacity: stale ? 0.65 : 1,
+            filter: stale ? 'none' : `drop-shadow(0 0 6px color-mix(in srgb, ${color} 35%, transparent))`,
           }}
         />
         {elapsed != null && (
@@ -56,7 +58,7 @@ export function Ring({ used, elapsed, size = 132 }: Props) {
           <AnimatedNumber value={used} decimals={0} />
           <span className="ml-0.5 text-sm font-medium text-muted-fg">%</span>
         </div>
-        <div className="mt-1 text-[11px] text-subtle-fg">used</div>
+        <div className="mt-1 text-[11px] text-subtle-fg">{stale ? 'last recorded' : 'used'}</div>
       </div>
     </div>
   );
