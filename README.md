@@ -12,7 +12,7 @@ Screenshot uses five sample accounts and generated usage data. No real account d
 
 ## Run it
 
-You need [Node.js](https://nodejs.org) 18 or newer (the Docker image and CI use Node 22; see `.nvmrc`).
+You need [Node.js](https://nodejs.org) 20 or newer (the Docker image and CI use Node 22; see `.nvmrc`). `npm start` fails with a clear message on unsupported Node or when `dist/` is missing (run `npm run build` first).
 
 ```bash
 npm install
@@ -33,8 +33,8 @@ npm run build
 npm start          # http://localhost:4777
 ```
 
-On Windows, run `scripts/start-dashboard.vbs` to start the production server without a console window. To launch it at sign-in, add a shortcut to this file in your user's Startup folder after running `npm run build`. The launcher keeps the browser closed; open <http://localhost:4777> when needed.
-Use `scripts/open-dashboard.vbs` for a Desktop shortcut that starts the server, waits until it is ready, and opens the dashboard in your browser.
+On Windows, run `scripts/start-dashboard.ps1` to start the production server without a console window (no VBScript needed). To launch it at sign-in, add a shortcut in your user's Startup folder with target `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "<repo>\scripts\start-dashboard.ps1"` after running `npm run build`. Errors show a message box. The launcher keeps the browser closed; open <http://localhost:4777> when needed.
+Use `scripts/open-dashboard.ps1` (same shortcut form) for a Desktop shortcut that starts the server, waits until it is ready, and opens the dashboard in your browser.
 
 ## Run it in Docker
 
@@ -71,7 +71,7 @@ Use **Add account** in the sidebar for others: give it a name and the account's 
 
 Max 5x and Max 20x cards omit the five-hour session window, including old cached readings. Other plans retain any five-hour window returned by their account's usage response.
 
-On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Desktop with a separate Work app profile. For a Desktop icon, create a shortcut to `wscript.exe` with [scripts/claude-work.vbs](scripts/claude-work.vbs) as its argument; leave launcher files in the repository so their relative paths work. Run `scripts/claude-work.cmd --cli` from a terminal when you want interactive Work Claude Code; other arguments pass through to the CLI. [scripts/claude-third.vbs](scripts/claude-third.vbs) opens an isolated Third Desktop profile using `~/.claude-third` for Claude Code. Sign in to each account separately once; launcher does not copy credentials.
+On Windows, [scripts/claude-work.cmd](scripts/claude-work.cmd) launches Claude Desktop with a separate Work app profile. For a Desktop icon, create a shortcut to `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "<repo>\scripts\claude-work.ps1"` ([scripts/claude-work.ps1](scripts/claude-work.ps1)); leave launcher files in the repository so their relative paths work. Run `scripts/claude-work.cmd --cli` from a terminal when you want interactive Work Claude Code; other arguments pass through to the CLI. [scripts/claude-third.ps1](scripts/claude-third.ps1) (same shortcut form) opens an isolated Third Desktop profile using `~/.claude-third` for Claude Code. Sign in to each account separately once; launcher does not copy credentials.
 
 ## Share local Claude Code chats
 
@@ -118,11 +118,13 @@ That lets anyone on your network see your usage percentages (never your logins).
 
 ```bash
 npm run typecheck   # tsc, covers src/ and vite.config.ts
-npm test            # node:test over server/*.test.js (cross-platform runner in scripts/run-tests.mjs)
+npm run typecheck:server  # checkJs over server/*.js (non-blocking, reports existing type errors)
+npm run lint        # eslint + react-hooks rules on src/
+npm test            # node:test over server/*.test.js and src/lib/lib.test.mjs (runner: scripts/run-tests.mjs)
 npm run test:coverage
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs typecheck and tests on pushes to `main` and on pull requests.
+GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, lint and tests on pushes to `main` and on pull requests.
 `classic-level` (native, Windows desktop label sync only) is an optional dependency; the server and Docker image run without it.
 Windows launchers write logs to `data/` (`dashboard-watchdog.log`, `dashboard-server.log`, `launcher.log`). The watchdog honors `PORT`.
 
