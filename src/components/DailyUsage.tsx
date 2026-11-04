@@ -68,21 +68,21 @@ function Seg<T extends string | number>({ value, options, onChange, label, group
   );
 }
 
-function Shares({ title, items, total, metric }: { title: string; items: NamedShare[]; total: number; metric: Metric }) {
+function Shares({ title, items, total, metric, color }: { title: string; items: (NamedShare & { id?: string })[]; total: number; metric: Metric; color: (item: NamedShare & { id?: string }, index: number) => string }) {
   return (
     <div className="min-w-0">
       <div className="mb-2 text-[12px] font-medium text-muted-fg">{title}</div>
       <ul className="flex flex-col gap-2">
-        {items.slice(0, 5).map((s) => {
+        {items.slice(0, 5).map((s, i) => {
           const v = metric === 'tokens' ? s.tokens : s.cost;
           return (
             <li key={s.name} className="text-[12.5px]">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate">{s.name}</span>
+                <span className="flex min-w-0 items-center gap-1.5"><span className="size-2 shrink-0 rounded-sm" style={{ background: color(s, i) }} /><span className="truncate">{s.name}</span></span>
                 <span className="shrink-0 tabular-nums text-muted-fg">{metric === 'tokens' ? tok(s.tokens) : usd(s.cost)}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-frame">
-                <div className="h-full rounded-full bg-accent" style={{ width: `${total ? Math.max(2, (v / total) * 100) : 0}%` }} />
+                <div className="h-full rounded-full" style={{ width: `${total ? Math.max(2, (v / total) * 100) : 0}%`, background: color(s, i) }} />
               </div>
             </li>
           );
@@ -177,7 +177,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
       const m = new Map<string, NamedShare>();
       for (const d of days) for (const s of pick(d)) {
         const name = pick === pickModels ? modelName(s.name) : s.name;
-        const cur = m.get(name) ?? { name, tokens: 0, cost: 0 };
+        const cur = m.get(s.name) ?? { name, id: s.name, tokens: 0, cost: 0 };
         cur.tokens += s.tokens; cur.cost += s.cost;
         m.set(s.name, cur);
       }
@@ -305,8 +305,8 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
             <RequestStats stats={view.stats} />
 
             <div className="mt-6 grid gap-6 sm:grid-cols-2">
-              <Shares title="By model" items={view.models} total={metric === 'tokens' ? view.totalTok : view.totalCost} metric={metric} />
-              <Shares title="By project" items={view.projects} total={metric === 'tokens' ? view.totalTok : view.totalCost} metric={metric} />
+              <Shares title="By model" items={view.models} total={metric === 'tokens' ? view.totalTok : view.totalCost} metric={metric} color={(s) => view.colorOf(s.id ?? s.name)} />
+              <Shares title="By project" items={view.projects} total={metric === 'tokens' ? view.totalTok : view.totalCost} metric={metric} color={(_s, i) => MODEL_COLORS[i % MODEL_COLORS.length]} />
             </div>
 
             <div className="mt-6">
