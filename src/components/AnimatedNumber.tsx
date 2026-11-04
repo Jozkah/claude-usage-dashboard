@@ -10,10 +10,17 @@ interface Props {
 
 /** Counts smoothly from the previous value to the new one. */
 export function AnimatedNumber({ value, decimals = 0, suffix = '', className = '' }: Props) {
-  const [shown, setShown] = useState(0);
-  const current = useRef(0);
+  // start at the real value: only later changes animate, and reduced motion skips the count entirely
+  const [shown, setShown] = useState(value);
+  const current = useRef(value);
 
   useEffect(() => {
+    if (current.current === value) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      current.current = value;
+      setShown(value);
+      return;
+    }
     const controls = animate(current.current, value, {
       duration: 0.9,
       ease: [0.16, 1, 0.3, 1],

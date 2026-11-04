@@ -1,6 +1,6 @@
 import { Clock, Flame, Trophy, Users } from 'lucide-react';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, fmtDur, headroom, levelFor } from '../lib/format';
+import { colorVar, fmtDur, headroom, levelFor, mainWindows, windowLength } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { useHistory } from '../lib/api';
 import { AnimatedNumber } from './AnimatedNumber';
@@ -39,7 +39,9 @@ export function StatRow({ accounts, now, tick }: Props) {
     }
   }
 
-  const bestHist = useHistory(best?.id, best?.windows?.[0]?.key, best?.windows?.[0]?.key.startsWith('seven_day') ? '7d' : '24h', tick);
+  // the window that produced the headroom number, so the trend describes the same limit
+  const bestWin = best ? mainWindows(best).reduce<UsageWindow | undefined>((m, w) => (!m || 100 - w.used < 100 - m.used ? w : m), undefined) : undefined;
+  const bestHist = useHistory(best?.id, bestWin?.key, bestWin?.key.startsWith('seven_day') ? '7d' : '24h', tick);
   const tightHist = useHistory(tight?.acc.id, tight?.w.key, '24h', tick);
 
   const tightColor = tight ? colorVar(levelFor(tight.w.used)) : 'var(--subtle-fg)';
@@ -82,7 +84,7 @@ export function StatRow({ accounts, now, tick }: Props) {
               ) : 'No data yet'}
             </div>
           </div>
-          <Sparkline values={bestHist.points.map((p) => p[1])} color="var(--good)" />
+          <Sparkline values={bestHist.points.map((p) => 100 - p[1])} color="var(--good)" />
         </Body>
       </FrameCard>
 
@@ -110,7 +112,7 @@ export function StatRow({ accounts, now, tick }: Props) {
               <div
                 className="h-full rounded-full bg-primary"
                 style={{
-                  width: `${Math.max(4, Math.min(100, (1 - (next.at - now) / (next.w.key === 'five_hour' ? 5 * 3600e3 : 7 * 864e5)) * 100))}%`,
+                  width: `${Math.max(4, Math.min(100, (1 - (next.at - now) / (windowLength(next.w.key) ?? 7 * 864e5)) * 100))}%`,
                   transition: 'width 1s linear',
                 }}
               />

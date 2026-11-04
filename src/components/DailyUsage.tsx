@@ -1,77 +1,76 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Loader2 } from 'lucide-react';
+import { fetchTokens } from '../lib/api';
+import type { DayUsage, NamedShare, TokenReport } from '../lib/types';
 import { FrameCard } from './FrameCard';
 
-interface NamedShare { name: string; tokens: number; cost: number }
-interface DayUsage {
-  date: string;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  total: number;
-  cost: number;
-  unpriced: number;
-  models: NamedShare[];
-  projects: NamedShare[];
-}
-interface TokenReport { scanning: boolean; ready: boolean; done: number; total: number; updatedAt: number; days: DayUsage[] }
-
-function useTokens(): TokenReport | null {
-  const [data, setData] = useState<TokenReport | null>(null);
+function useTokens() {
+  const [report, setReport] = useState<TokenReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       let wait = 60_000;
       try {
-        const r = await fetch('/api/tokens?days=90', { cache: 'no-store' });
-        if (r.ok) {
-          const j = (await r.json()) as TokenReport;
-          if (!stop) setData(j);
-          if (j.scanning || !j.ready) wait = 5_000;
-        }
-      } catch { /* server restarting */ }
+        const j = await fetchTokens(90);
+        if (!stop) { setReport(j); setError(null); }
+        if (j.scanning || !j.ready) wait = 5_000;
+      } catch (e) {
+        if (!stop) setError(e instanceof Error ? e.message : 'Server not reachable');
+        wait = 15_000;
+      }
       if (!stop) timer = setTimeout(load, wait);
     };
     void load();
     return () => { stop = true; clearTimeout(timer); };
-  }, []);
-  return data;
+  }, [attempt]);
+  return { report, error, retry: () => setAttempt((n) => n + 1) };
 }
 
 const tok = (n: number) =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
 const usd = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
-function modelName(id: string): string {
-  const clean = id.replace(/^anthropic\./i, '').replace(/-\d{8}$/, '');
-  const legacy = /^claude-(\d+)-(\d+)-([a-z]+)(.*)$/i.exec(clean);
-  if (legacy) {
-    const family = legacy[3][0].toUpperCase() + legacy[3].slice(1);
-    const suffix = legacy[4].replace(/^-/, '').replace(/-/g, ' ');
-    return `Claude ${family} ${legacy[1]}.${legacy[2]}${suffix ? ` ${suffix}` : ''}`;
-  }
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean);
+const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
+export function modelName(id: string): string {
+  const clean = id
+    .replace(/^(?:[a-z]{2}\.)?anthropic\./i, '') // bedrock prefixes, optionally with a region
+    .replace(/-v\d+(?::\d+)?$/i, '')
+    .replace(/@\d{8}$/, '')
+    .replace(/-(?:\d{8}|latest)$/, '');
+  const fmt = (family: string, version: string, rest: string) => {
+    const suffix = rest.replace(/^-/, '').replace(/-/g, ' ');
+    return `Claude ${cap(family)} ${version}${suffix ? ` ${suffix}` : ''}`;
+  };
+  const legacy = /^claude-(\d+)-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-5-sonnet
+  if (legacy) return fmt(legacy[3], `${legacy[1]}.${legacy[2]}`, legacy[4]);
+  const old = /^claude-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-opus
+  if (old) return fmt(old[2], old[1], old[3]);
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean); // claude-sonnet-4-5
   if (!match) return id === 'unknown' ? 'Unknown model' : id;
-  const family = match[1][0].toUpperCase() + match[1].slice(1);
-  const version = match[3] ? `${match[2]}.${match[3]}` : match[2];
-  const suffix = match[4].replace(/^-/, '').replace(/-/g, ' ');
-  return `Claude ${family} ${version}${suffix ? ` ${suffix}` : ''}`;
+  return fmt(match[1], match[3] ? `${match[2]}.${match[3]}` : match[2], match[4]);
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** Pure calendar arithmetic on YYYY-MM-DD strings, so no browser time zone gets involved. */
+const addDays = (iso: string, n: number) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
 
 const RANGES = [7, 30, 90] as const;
 type Metric = 'tokens' | 'cost';
 
-function Seg<T extends string | number>({ value, options, onChange, label }: { value: T; options: readonly T[]; onChange: (v: T) => void; label: (v: T) => string }) {
+function Seg<T extends string | number>({ value, options, onChange, label, group }: { value: T; options: readonly T[]; onChange: (v: T) => void; label: (v: T) => string; group: string }) {
   return (
-    <div className="flex rounded-lg border border-line bg-card p-0.5 text-xs">
+    <div role="group" aria-label={group} className="flex rounded-lg border border-line bg-card p-0.5 text-xs">
       {options.map((o) => (
         <button
           key={String(o)}
           onClick={() => onChange(o)}
+          aria-pressed={value === o}
           className={`rounded-md px-2.5 py-1 font-medium transition-colors ${value === o ? 'bg-frame text-fg' : 'text-muted-fg hover:text-fg'}`}
         >
           {label(o)}
@@ -106,8 +105,8 @@ function Shares({ title, items, total, metric }: { title: string; items: NamedSh
   );
 }
 
-export function DailyUsage({ delay = 0 }: { delay?: number }) {
-  const report = useTokens();
+export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: number }) {
+  const { report, error, retry } = useTokens();
   const [range, setRange] = useState<(typeof RANGES)[number]>(30);
   const [metric, setMetric] = useState<Metric>('tokens');
   const [hover, setHover] = useState<number | null>(null);
@@ -115,17 +114,21 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
   const view = useMemo(() => {
     const byDate = new Map((report?.days ?? []).map((d) => [d.date, d]));
     const list: { date: string; d: DayUsage | undefined }[] = [];
+    // the server buckets days in its own time zone: anchor on its calendar, not the browser's
+    const latest = [...byDate.keys()].sort().pop() ?? '';
+    const local = key(new Date());
+    const today = report?.today ?? (latest > local ? latest : local);
     for (let i = range - 1; i >= 0; i--) {
-      const dt = new Date();
-      dt.setDate(dt.getDate() - i);
-      const k = key(dt);
+      const k = addDays(today, -i);
       list.push({ date: k, d: byDate.get(k) });
     }
     const days = list.map((x) => x.d).filter((x): x is DayUsage => !!x);
+    const pickModels = (d: DayUsage) => d.models;
     const merge = (pick: (d: DayUsage) => NamedShare[]) => {
       const m = new Map<string, NamedShare>();
       for (const d of days) for (const s of pick(d)) {
-        const cur = m.get(s.name) ?? { name: s.name, tokens: 0, cost: 0 };
+        const name = pick === pickModels ? modelName(s.name) : s.name;
+        const cur = m.get(name) ?? { name, tokens: 0, cost: 0 };
         cur.tokens += s.tokens; cur.cost += s.cost;
         m.set(s.name, cur);
       }
@@ -141,9 +144,9 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
       val,
       totalTok, totalCost, unpriced,
       activeDays: days.length,
-      models: merge((d) => d.models).map((m) => ({ ...m, name: modelName(m.name) })),
+      models: merge(pickModels),
       projects: merge((d) => d.projects),
-      table: [...days].sort((a, b) => (a.date < b.date ? 1 : -1)),
+      table: [...days].map((d) => ({ ...d, models: [...d.models].sort((a, b) => b.tokens - a.tokens) })).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   }, [report, range, metric]);
 
@@ -158,16 +161,28 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
       delay={delay}
       right={
         <div className="flex items-center gap-2">
-          <Seg value={metric} options={['tokens', 'cost'] as const} onChange={setMetric} label={(v) => (v === 'tokens' ? 'Tokens' : 'Est. cost')} />
-          <Seg value={range} options={RANGES} onChange={setRange} label={(v) => `${v}d`} />
+          <Seg group="Metric" value={metric} options={['tokens', 'cost'] as const} onChange={setMetric} label={(v) => (v === 'tokens' ? 'Tokens' : 'Est. cost')} />
+          <Seg group="Days shown" value={range} options={RANGES} onChange={setRange} label={(v) => `${v}d`} />
         </div>
       }
     >
       <div className="p-4">
-        {!report && <div className="h-40 animate-pulse rounded-lg bg-frame" />}
+        {!report && !error && <div className="h-40 animate-pulse rounded-lg bg-frame" />}
+        {!report && error && (
+          <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-bad/40 bg-bad/10 px-3 py-3 text-[13px]">
+            <span>Could not load daily usage ({error}).</span>
+            <button onClick={retry} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium">Retry</button>
+          </div>
+        )}
 
         {report && (
           <>
+            {error && (
+              <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12.5px]">
+                <span>Showing older numbers: the latest refresh failed ({error}).</span>
+                <button onClick={retry} className="rounded-md border border-line bg-card px-2.5 py-0.5 text-xs font-medium">Retry</button>
+              </div>
+            )}
             {scanning && (
               <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-line bg-frame/60 px-3 py-2 text-[12.5px] text-muted-fg">
                 <Loader2 className="size-3.5 animate-spin" />
@@ -191,11 +206,26 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
               </div>
             </div>
 
-            <div className="mt-4 flex h-36 items-end gap-[3px]" onMouseLeave={() => setHover(null)}>
+            <div
+              role="group"
+              aria-label={`Daily ${metric === 'tokens' ? 'tokens' : 'estimated cost'}, last ${range} days`}
+              className="mt-4 flex h-36 items-end gap-[3px]"
+              onPointerLeave={() => setHover(null)}
+            >
               {view.list.map((x, i) => {
                 const v = view.val(x.d);
                 return (
-                  <div key={x.date} className="group flex h-full min-w-0 flex-1 items-end" onMouseEnter={() => setHover(i)}>
+                  <div
+                    key={x.date}
+                    tabIndex={0}
+                    role="img"
+                    aria-label={`${x.date}: ${metric === 'tokens' ? `${tok(v)} tokens` : usd(v)}`}
+                    className="group flex h-full min-w-0 flex-1 items-end rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                    onPointerEnter={() => setHover(i)}
+                    onPointerDown={() => setHover(i)}
+                    onFocus={() => setHover(i)}
+                    onBlur={() => setHover(null)}
+                  >
                     <div
                       className={`w-full rounded-t-[3px] transition-colors ${hover === i ? 'bg-accent' : 'bg-accent/55'}`}
                       style={{ height: v ? `${Math.max(3, (v / view.max) * 100)}%` : '2px', opacity: v ? 1 : 0.25, transition: 'height .7s var(--ease-out-expo)' }}
@@ -247,11 +277,11 @@ export function DailyUsage({ delay = 0 }: { delay?: number }) {
               Read from the chat logs on this computer, so phone and other-PC usage is not included here (it is in the limit gauges above).
               Cost uses <a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noreferrer" className="underline">Anthropic’s public API prices</a>, not what your plan charges. Fast mode, US inference, batch pricing, and web searches are included when recorded in the logs
               {view.unpriced > 0 ? `; ${tok(view.unpriced)} tokens from models without a known price are counted in tokens only` : ''}.
-              Logs are shared by all accounts on this PC, so this is a combined total.
+              Logs are shared by all accounts on this PC, so this is a combined total. Days follow {report.timeZone ? `the ${report.timeZone} time zone` : 'the server’s local calendar'}.
             </p>
           </>
         )}
       </div>
     </FrameCard>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { ChartColumn, ChartLine, TrendingUp } from 'lucide-react';
 import type { Account, RangeKey } from '../lib/types';
 import { colorVar, levelFor } from '../lib/format';
@@ -18,36 +18,37 @@ interface Props {
 
 function AccountTrend({ account, selectedKey, range, mode, tick }: { account: Account; selectedKey: string; range: RangeKey; mode: 'bars' | 'area'; tick: number }) {
   const window = account.windows?.find((item) => item.key === selectedKey) ?? account.windows?.[0];
-  const { points, ready } = useHistory(account.id, window?.key, range, tick);
+  const { points, ready, error, retry } = useHistory(account.id, window?.key, range, tick);
   return (
     <div className="rounded-lg border border-line bg-frame/40 p-3">
       <div className="mb-2 flex items-center justify-between gap-3 text-xs">
         <span className="font-medium">{account.name} · {window?.label ?? 'No limit'}</span>
         <span className="text-muted-fg">{window ? `${Math.round(window.used)}% used${account.stale ? ' · last reading' : ''}` : 'No reading'}</span>
       </div>
-      <UsageChart points={points} range={range} mode={mode} ready={ready} seriesKey={`${account.id}:${window?.key}`} />
+      <UsageChart points={points} range={range} mode={mode} ready={ready} error={error} onRetry={retry} seriesKey={`${account.id}:${window?.key}`} />
     </div>
   );
 }
 
-export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props) {
+export const TrendCard = memo(function TrendCard({ accounts, preferredId, tick, range, onRange }: Props) {
   const okAccounts = accounts.filter((a) => a.status === 'ok' && a.windows?.length);
   const [accId, setAccId] = useState('');
   const [key, setKey] = useState('five_hour');
   const [mode, setMode] = useState<'bars' | 'area'>('bars');
 
   // follow the account picked in the sidebar
+  const okIds = okAccounts.map((a) => a.id).join('\n');
   useEffect(() => {
-    if (preferredId !== 'all' && okAccounts.some((a) => a.id === preferredId)) setAccId(preferredId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferredId]);
+    if (preferredId !== 'all' && okIds.split('\n').includes(preferredId)) setAccId(preferredId);
+  }, [preferredId, okIds]);
 
   const acc = okAccounts.find((a) => a.id === accId) ?? okAccounts[0];
   const showAll = accId === 'all';
   const windows = acc?.windows ?? [];
   const win = windows.find((w) => w.key === key) ?? windows[0];
 
-  const { points, ready } = useHistory(acc?.id, win?.key, range, tick);
+  // the single-series fetch is only needed when one account is shown
+  const { points, ready, error, retry } = useHistory(showAll ? undefined : acc?.id, win?.key, range, tick);
   const peak = useMemo(() => points.reduce((m, p) => Math.max(m, p[1]), 0), [points]);
 
   const seg = (active: boolean) =>
@@ -55,14 +56,14 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
 
   const right = (
     <div className="flex items-center gap-2">
-      <div className="flex rounded-lg border border-line bg-frame p-0.5">
+      <div role="group" aria-label="Time range" className="flex rounded-lg border border-line bg-frame p-0.5">
         {(['6h', '24h', '7d'] as RangeKey[]).map((r) => (
-          <button key={r} onClick={() => onRange(r)} className={seg(range === r)}>{r}</button>
+          <button key={r} onClick={() => onRange(r)} aria-pressed={range === r} className={seg(range === r)}>{r}</button>
         ))}
       </div>
-      <div className="flex rounded-lg border border-line bg-frame p-0.5">
-        <button onClick={() => setMode('bars')} className={seg(mode === 'bars')} title="Bars"><ChartColumn className="size-3.5" /></button>
-        <button onClick={() => setMode('area')} className={seg(mode === 'area')} title="Line"><ChartLine className="size-3.5" /></button>
+      <div role="group" aria-label="Chart style" className="flex rounded-lg border border-line bg-frame p-0.5">
+        <button onClick={() => setMode('bars')} aria-pressed={mode === 'bars'} aria-label="Bars" className={seg(mode === 'bars')} title="Bars"><ChartColumn className="size-3.5" /></button>
+        <button onClick={() => setMode('area')} aria-pressed={mode === 'area'} aria-label="Line" className={seg(mode === 'area')} title="Line"><ChartLine className="size-3.5" /></button>
       </div>
     </div>
   );
@@ -72,11 +73,11 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
       <div className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: win ? colorVar(levelFor(win.used)) : undefined }}>
+            <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: win && !showAll ? colorVar(levelFor(win.used)) : undefined }}>
               {showAll ? `${okAccounts.length} accounts` : win ? <AnimatedNumber value={win.used} suffix="%" /> : '—'}
             </div>
             <div className="mt-2 text-xs text-muted-fg">
-              {showAll ? 'Recorded usage for every account' : win ? <>now · peak <span className="font-medium text-fg">{Math.round(peak)}%</span> in this range</> : 'No data yet'}
+              {showAll ? `Recorded usage for every account${win ? ` · limit: ${win.label}` : ''}` : win ? <>now · peak <span className="font-medium text-fg">{Math.round(peak)}%</span> in this range</> : 'No data yet'}
             </div>
           </div>
           <div className="flex gap-2">
@@ -86,9 +87,9 @@ export function TrendCard({ accounts, preferredId, tick, range, onRange }: Props
         </div>
         <div className="mt-4">
           {showAll ? <div className="space-y-3">{okAccounts.map((account) => <AccountTrend key={account.id} account={account} selectedKey={key} range={range} mode={mode} tick={tick} />)}</div>
-            : <UsageChart points={points} range={range} mode={mode} ready={ready} seriesKey={`${acc?.id}:${win?.key}`} />}
+            : <UsageChart points={points} range={range} mode={mode} ready={ready} error={error} onRetry={retry} seriesKey={`${acc?.id}:${win?.key}`} />}
         </div>
       </div>
     </FrameCard>
   );
-}
+});

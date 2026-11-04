@@ -40,8 +40,19 @@ export function Select({ value, options, onChange, label, className = '' }: Prop
     if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => Math.min(options.length - 1, i + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(0, i - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActive(options.length - 1); }
     else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (options[active]) pick(options[active]); }
     else if (e.key === 'Tab') setOpen(false);
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // type-ahead: jump to the next option starting with the typed letter
+      const c = e.key.toLowerCase();
+      const n = options.length;
+      for (let step = 1; step <= n; step++) {
+        const i = (active + step) % n;
+        if (options[i].label.toLowerCase().startsWith(c)) { setActive(i); break; }
+      }
+    }
   };
 
   return (
@@ -52,7 +63,8 @@ export function Select({ value, options, onChange, label, className = '' }: Prop
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-controls={listId}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open ? `${listId}-${active}` : undefined}
         onClick={() => (open ? setOpen(false) : openMenu())}
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs font-medium text-fg outline-none transition-colors hover:border-accent/40 focus-visible:ring-2 focus-visible:ring-accent/40"
       >
@@ -65,11 +77,12 @@ export function Select({ value, options, onChange, label, className = '' }: Prop
           id={listId}
           role="listbox"
           aria-label={label}
-          className="animate-fade absolute right-0 z-30 mt-1.5 max-h-64 min-w-full overflow-auto rounded-lg border border-line bg-card p-1 shadow-[0_8px_30px_rgba(0,0,0,0.25)]"
+          className="animate-fade absolute right-0 z-30 mt-1.5 max-h-64 min-w-full max-w-[90vw] overflow-auto rounded-lg border border-line bg-card p-1 shadow-[0_8px_30px_rgba(0,0,0,0.25)]"
         >
           {options.map((o, i) => (
             <li
               key={o.value}
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={o.value === value}
               onMouseEnter={() => setActive(i)}

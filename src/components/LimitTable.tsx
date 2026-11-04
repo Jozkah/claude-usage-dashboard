@@ -28,6 +28,7 @@ const STATUS: Record<Level | 'reached', { label: string; icon: typeof CircleChec
 export function LimitTable({ accounts, now }: { accounts: Account[]; now: number }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'used', dir: -1 });
 
+  const nowBucket = Math.floor(now / 30000);
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     for (const a of accounts) {
@@ -51,9 +52,8 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
       const b = key === 'account' ? y.account : key === 'window' ? y.window : key === 'used' ? y.used : y.resetAt ?? Infinity;
       return (a < b ? -1 : a > b ? 1 : 0) * dir;
     });
-    // `now` is intentionally not a dependency of the sort order for reset times
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts, sort, Math.floor(now / 30000)]);
+    // `now` is deliberately bucketed to 30 s so the sort order does not reshuffle every second
+  }, [accounts, sort, nowBucket]);
 
   const th = (key: SortKey, label: string, cls = '') => {
     const active = sort.key === key;

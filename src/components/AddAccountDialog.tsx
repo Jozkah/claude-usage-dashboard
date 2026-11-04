@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
 import { addAccount } from '../lib/api';
 import { Modal } from './Modal';
 
@@ -11,21 +11,28 @@ interface Props {
 const inputCls =
   'w-full rounded-lg border border-line bg-frame px-3 py-2 text-sm outline-none transition-shadow placeholder:text-subtle-fg focus:ring-2 focus:ring-accent/40';
 
-export function AddAccountDialog({ open, onClose, onAdded }: Props) {
+export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, onAdded }: Props) {
   const [name, setName] = useState('');
   const [dir, setDir] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const openRef = useRef(open);
+  openRef.current = open;
+
   useEffect(() => {
-    if (open) { setName(''); setDir(''); setError(''); }
+    if (open) { setName(''); setDir(''); setError(''); setBusy(false); }
   }, [open]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const err = await addAccount(name, dir);
-    setBusy(false);
+    setError('');
+    let err: string | null;
+    try { err = await addAccount(name, dir); }
+    catch (ex) { err = ex instanceof Error ? ex.message : 'Could not add the account.'; }
+    finally { setBusy(false); }
+    if (!openRef.current) return; // dialog was closed while the request ran
     if (err) return setError(err);
     onAdded();
     onClose();
@@ -44,7 +51,7 @@ export function AddAccountDialog({ open, onClose, onAdded }: Props) {
           Log in there once with Claude Code first. Running in Docker? Mount the folder under <code className="rounded bg-frame px-1">/accounts</code> instead.
         </p>
 
-        <p className="mt-3 min-h-5 text-[13px] text-bad">{error}</p>
+        <p role="alert" className="mt-3 min-h-5 text-[13px] text-bad">{error}</p>
         <div className="mt-2 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-line px-3.5 py-2 text-sm transition-colors hover:bg-frame">Cancel</button>
           <button disabled={busy} className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-60">
@@ -54,4 +61,4 @@ export function AddAccountDialog({ open, onClose, onAdded }: Props) {
       </form>
     </Modal>
   );
-}
+});
