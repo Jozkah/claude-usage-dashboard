@@ -11,7 +11,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { priceFor, costOf } from './pricing.js';
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
+/* Prompt size class of one request (long-context rates apply per request, buckets are per day): 0 up to 200k, 1 up to 272k, 2 above. */
+const promptClass = (n) => (n > 272000 ? 2 : n > 200000 ? 1 : 0);
+const PROMPT_OF_CLASS = [0, 200001, 272001];
 const CHUNK = 1 << 20;
 const pad = (n) => String(n).padStart(2, '0');
 const dayKey = (ts) => {
@@ -74,8 +77,8 @@ export function createOtherUsageStore({ now = Date.now, chunkSize = 4 * 1024 * 1
     } catch { dirty = true; }
   }
 
-  function add(target, day, client, model, project, b) {
-    const k = JSON.stringify([client, model, project]);
+  function add(target, day, client, model, project, b, prompt) {
+    const k = JSON.stringify([client, model, project, promptClass(prompt)]);
     const bucket = ((target[day] ||= {})[k] ||= emptyBucket());
     for (let i = 0; i < 6; i++) bucket[i] += b[i];
   }
@@ -108,7 +111,7 @@ export function createOtherUsageStore({ now = Date.now, chunkSize = 4 * 1024 * 1
     const input = Math.max(0, (Number(last.input_tokens) || 0) - cached - written);
     const output = Number(last.output_tokens) || 0;
     if (!input && !output && !cached && !written) return;
-    add(state.days, day, 'codex', f.model || 'unknown', f.project || 'unknown', [input, output, cached, written, Number(last.reasoning_output_tokens) || 0, 1]);
+    add(state.days, day, 'codex', f.model || 'unknown', f.project || 'unknown', [input, output, cached, written, Number(last.reasoning_output_tokens) || 0, 1], Number(last.input_tokens) || 0);
     dirty = true;
   }
 
@@ -175,7 +178,7 @@ export function createOtherUsageStore({ now = Date.now, chunkSize = 4 * 1024 * 1
         const cache = t.cache || {};
         const b = [Number(t.input) || 0, Number(t.output) || 0, Number(cache.read) || 0, Number(cache.write) || 0, Number(t.reasoning) || 0, 1];
         if (!b[0] && !b[1] && !b[2] && !b[3]) continue;
-        add(next, day, 'opencode', m.modelID || 'unknown', folderOf(m.path?.cwd), b);
+        add(next, day, 'opencode', m.modelID || 'unknown', folderOf(m.path?.cwd), b, b[0] + b[2] + b[3]);
       }
       openCode = next;
     } catch { /* locked or unsupported schema: keep the previous numbers */ } finally { try { db?.close(); } catch { /* ignore */ } }
@@ -207,12 +210,12 @@ export function createOtherUsageStore({ now = Date.now, chunkSize = 4 * 1024 * 1
       for (const [day, buckets] of Object.entries(source)) {
         if (day < cutoff) continue;
         for (const [k, b] of Object.entries(buckets)) {
-          const [client, model, project] = JSON.parse(k);
+          const [client, model, project, cls = 0] = JSON.parse(k);
           const row = out.get(day) || { date: day, clients: {} };
           out.set(day, row);
           const c = (row.clients[names[client] || client] ||= sliceOf());
           const price = priceFor(model);
-          const cost = price ? costOf(price, { in: b[0], out: b[1], cr: b[2], c5: b[3], c1: 0, prompt: b[0] + b[2] + b[3] }) : 0;
+          const cost = price ? costOf(price, { in: b[0], out: b[1], cr: b[2], c5: b[3], c1: 0, prompt: PROMPT_OF_CLASS[cls] }) : 0;
           const tok = b[0] + b[1] + b[2] + b[3];
           c.requests += b[5]; c.input += b[0]; c.output += b[1]; c.cacheRead += b[2]; c.cacheWrite += b[3]; c.reasoning += b[4];
           c.total += tok; c.cost += cost; if (!price) c.unpriced += tok;

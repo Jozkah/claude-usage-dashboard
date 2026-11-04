@@ -62,6 +62,75 @@ const FAST_PRICES = {
   'opus-4-8': [10, 50],
 };
 
+/* Non-Claude models, USD per million tokens, standard tier: [input, cached input, output, long input, long output].
+   Cached input null = no cache discount listed (billed as input). Long rates apply when one request's prompt is larger
+   than the threshold; OpenAI 272k, Google 200k. Cache writes are not billed separately by these providers.
+   Sources: https://developers.openai.com/api/docs/pricing and https://aistudio.google.com/docs/pricing (checked 2026-11-04).
+   The fast / priority / batch tiers are not visible in local logs, so everything is priced at the standard tier. */
+const OPENAI_LONG = 272000;
+const GOOGLE_LONG = 200000;
+const OTHER_PRICES = {
+  'gpt-6-astra': [10, 1, 50, 20, 75, OPENAI_LONG],
+  'gpt-6.1-sol': [2, 0.1, 10, 4, 15, OPENAI_LONG],
+  'gpt-6.1-terra': [1, 0.05, 5, 2, 7.5, OPENAI_LONG],
+  'gpt-6-luna': [0.1, 0.01, 0.5, 0.2, 0.75, OPENAI_LONG],
+  'gpt-6-sol': [2, 0.2, 10, 4, 15, OPENAI_LONG],
+  'gpt-5.6-sol': [4, 0.4, 20, 8, 30, OPENAI_LONG],
+  'gpt-5.6-terra': [2, 0.2, 12, 4, 18, OPENAI_LONG],
+  'gpt-5.6-luna': [0.2, 0.02, 1.2, 0.4, 1.8, OPENAI_LONG],
+  'gpt-5.5': [5, 0.5, 30, 10, 45, OPENAI_LONG],
+  'gpt-5.5-pro': [30, null, 180, 60, 270, OPENAI_LONG],
+  'gpt-5.4': [2.5, 0.25, 15, 5, 22.5, OPENAI_LONG],
+  'gpt-5.4-pro': [30, null, 180, 60, 270, OPENAI_LONG],
+  'gpt-5.4-mini': [0.75, 0.075, 4.5],
+  'gpt-5.4-nano': [0.2, 0.02, 1.25],
+  'gpt-5.3-codex': [1.75, 0.175, 14],
+  'gpt-5.2': [1.75, 0.175, 14],
+  'gpt-5.2-pro': [21, null, 168],
+  'gpt-5.1': [1.25, 0.125, 10],
+  'gpt-5': [1.25, 0.125, 10],
+  'gpt-5-mini': [0.25, 0.025, 2],
+  'gpt-5-nano': [0.05, 0.005, 0.4],
+  'gpt-5-pro': [15, null, 120],
+  'gpt-4.1': [2, 0.5, 8],
+  'gpt-4.1-mini': [0.4, 0.1, 1.6],
+  'gpt-4o': [2.5, 1.25, 10],
+  'gpt-4o-mini': [0.15, 0.075, 0.6],
+  'o3': [2, 0.5, 8],
+  'o3-pro': [20, null, 80],
+  'gemini-3.1-pro-preview': [2, 0.2, 12, 4, 18, GOOGLE_LONG],
+  'gemini-3.1-flash-lite': [0.25, 0.025, 1.5],
+  'gemini-3-flash-preview': [0.5, 0.05, 3],
+  'gemini-3.5-flash-lite': [0.3, 0.03, 2.5],
+  'gemini-3.6-flash': [0.75, 0.075, 3.75],
+  'gemini-3.8-flash': [0.75, 0.075, 3.75],
+  'gemini-4-argon': [2, 0.1, 10],
+  'gemini-2.5-pro': [1.25, 0.125, 10, 2.5, 15, GOOGLE_LONG],
+  'gemini-2.5-flash': [0.3, 0.03, 2.5],
+  'gemini-2.5-flash-lite': [0.1, 0.01, 0.4],
+};
+/* Announced price changes: from this day on the model is billed at the second set of rates. */
+const OTHER_STEPS = {
+  'gemini-3.6-flash': ['2027-01-01', [1.5, 0.15, 7.5]],
+  'gemini-3.8-flash': ['2027-01-01', [1.5, 0.15, 7.5]],
+  'gemini-4-argon': ['2026-12-01', [4, 0.2, 20]],
+};
+const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+function otherPriceFor(model) {
+  const key = String(model || '').toLowerCase().replace(/\\/g, '/').split('/').filter(Boolean).pop()
+    ?.replace(/:latest$/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
+  let rates = key && Object.hasOwn(OTHER_PRICES, key) ? OTHER_PRICES[key] : null;
+  if (!rates) return null;
+  const step = OTHER_STEPS[key];
+  if (step && todayKey() >= step[0]) rates = [...step[1], undefined, undefined, rates[5]];
+  const [i, cached, o, longIn, longOut, threshold] = rates;
+  return {
+    i, o, read: cached == null ? 1 : cached / i, w5: 1, w1: 1,
+    long: longIn ? { threshold, i: longIn, o: longOut, verified: true } : undefined, fast: undefined,
+  };
+}
+
 export function priceFor(model) {
   const normalized = String(model || '').toLowerCase().replace(/^anthropic\./, '').replace(/\[[^\]]*\]$/, '');
   let key = null;
@@ -71,7 +140,8 @@ export function priceFor(model) {
     key = `${match[2]}-3${match[1] ? '-' + match[1] : ''}`;
   }
   const rates = key && PRICES[key];
-  return rates ? { i: rates[0], o: rates[1], read: rates[2], long: LONG_PROMPT[key], fast: FAST_PRICES[key] } : null;
+  if (rates) return { i: rates[0], o: rates[1], read: rates[2], long: LONG_PROMPT[key], fast: FAST_PRICES[key] };
+  return otherPriceFor(model);
 }
 
 export function costOf(price, usage) {
@@ -83,7 +153,7 @@ export function costOf(price, usage) {
   const input = fast ? fast[0] : long ? long.i : price.i;
   const output = fast ? fast[1] : long ? long.o : price.o;
   const tokenCost = (usage.in * input + usage.out * output + usage.cr * input * price.read
-    + usage.c5 * input * 1.25 + usage.c1 * input * 2) / 1e6;
+    + usage.c5 * input * (price.w5 ?? 1.25) + usage.c1 * input * (price.w1 ?? 2)) / 1e6;
   const batch = usage.tier === 'batch' ? 0.5 : 1;
   const region = usage.geo === 'us' ? 1.1 : 1;
   return tokenCost * batch * region + searches * 0.01;

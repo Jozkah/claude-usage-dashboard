@@ -576,7 +576,7 @@ async function handler(req, res) {
       for (const d of report.days) for (const m of d.models) {
         if (m.name in prices) continue;
         const p = priceFor(m.name);
-        if (p) prices[m.name] = { input: p.i, output: p.o, cacheRead: p.i * p.read, cacheWrite: p.i * 1.25 };
+        if (p) prices[m.name] = { input: p.i, output: p.o, cacheRead: p.i * p.read, cacheWrite: p.i * (p.w5 ?? 1.25) };
       }
       return sendJson(res, 200, { ...report, prices, today: localDayKey(), timeZone: localTimeZone() });
     }

@@ -96,3 +96,14 @@ test('every priced model has a reviewed long-context decision (fails when a mode
 test('Claude 4.6+ models are flat across a 1M window', () => {
   assert.equal(costOf(priceFor('claude-opus-4-6'), { in: 900000, out: 0, cr: 0, c5: 0, c1: 0 }), 4.5);
 });
+
+test('OpenAI and Google models are priced from their public tables; cache reads are discounted, writes billed as input', () => {
+  const sol = priceFor('gpt-6-sol');
+  assert.ok(Math.abs(costOf(sol, { in: 1e5, out: 1e5, cr: 1e5, c5: 0, c1: 0 }) - 1.22) < 1e-9);
+  assert.equal(costOf(sol, { in: 1e6, out: 1e6, cr: 0, c5: 0, c1: 0, prompt: 272001 }), 4 + 15); // long context
+  assert.equal(costOf(priceFor('openai/gpt-5.5-pro-2026-03-05'), { in: 1e5, out: 0, cr: 1e5, c5: 0, c1: 0 }), 6); // no cache discount listed
+  assert.equal(costOf(priceFor('gemini-3.1-pro-preview'), { in: 1e5, out: 1e5, cr: 0, c5: 0, c1: 0 }), 1.4);
+  assert.equal(costOf(priceFor('gemini-3.1-pro-preview'), { in: 1e5, out: 1e5, cr: 0, c5: 0, c1: 0, prompt: 200001 }), 2.2);
+  assert.equal(priceFor('codex-auto-review'), null); // no public price
+  assert.equal(priceFor('/data/models/x/hy3.gguf'), null);
+});
