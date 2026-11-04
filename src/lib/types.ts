@@ -22,6 +22,8 @@ export interface Account {
   id: string;
   name: string;
   configDir: string;
+  /** Absent for Claude Code accounts. */
+  provider?: 'codex';
   fetchedAt: number;
   plan?: string | null;
   /** Snapshot seeded without a known plan: limits shown may be incomplete. */

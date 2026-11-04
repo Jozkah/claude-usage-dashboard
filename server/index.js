@@ -28,6 +28,7 @@ import { syncMergedDesktopLabelsMany, desktopLabelSyncStatus } from './desktop-l
 import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 import { syncAllAccounts } from './account-sync.js';
+import { fetchCodexStatus } from './codex.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
   parseAllowedHosts, hostAllowed, guardMutation, SECURITY_HEADERS } from './http-utils.js';
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
@@ -94,7 +95,7 @@ function runAccountSync() {
   if (accountSyncBusy) throw new HttpError(409, 'Account sync is already running.');
   accountSyncBusy = true;
   try {
-    const accounts = loadAccounts().map((a) => ({ id: a.id, name: a.name, configDir: expandHome(a.configDir) }));
+    const accounts = claudeAccounts().map((a) => ({ id: a.id, name: a.name, configDir: expandHome(a.configDir) }));
     const result = syncAllAccounts(accounts);
     const errors = result.accounts.flatMap((a) => a.errors.map((e) => `${a.name || a.id}: ${e}`));
     accountSyncStatus = { ...accountSyncStatus, lastRun: Date.now(), lastError: errors.length ? errors.join(' | ') : null, result };
@@ -181,6 +182,9 @@ function warnOnce(key, message) {
   console.warn(message);
 }
 
+/** Codex accounts only report usage; chats, skills and plugins belong to Claude Code accounts. */
+function claudeAccounts() { return loadAccounts().filter((a) => a.provider !== 'codex'); }
+
 function saveAccounts(accounts) {
   if (MOCK) { mockAccounts = accounts; return; }
   writeFileAtomic(CONFIG_FILE, JSON.stringify({ accounts }, null, 2));
@@ -235,10 +239,16 @@ function parseWindows(data) {
 const readSessions = createSessionReader({ inContainer: Boolean(ACCOUNTS_DIR) }); // host pids are not visible in Docker
 
 async function safeSessions(acc) {
+  if (acc.provider === 'codex') return []; // Codex keeps no Claude Code session files
   try { return await readSessions(expandHome(acc.configDir)); } catch { return []; }
 }
 
 async function fetchStatus(acc) {
+  if (acc.provider === 'codex') {
+    const status = await fetchCodexStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
+      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
+    return { ...status, configDir: acc.configDir };
+  }
   const base = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now() };
   let creds;
   try { creds = await readCredentials(expandHome(acc.configDir)); } catch (e) {
@@ -547,7 +557,7 @@ async function handler(req, res) {
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
       // sessions: async, cached 3 s per config folder; usage is cached longer
       const sessionLists = MOCK ? [] : await Promise.all(accounts.map(safeSessions));
-      const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir,
+      const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
         sessions: MOCK ? [] : sessionLists[i] }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
@@ -588,7 +598,7 @@ async function handler(req, res) {
       }
       let id = slug(name);
       while (accounts.some((a) => a.id === id)) id = slug(name) + '-' + crypto.randomBytes(2).toString('hex');
-      accounts.push({ id, name, configDir });
+      accounts.push({ id, name, configDir, ...(body.provider === 'codex' ? { provider: 'codex' } : {}) });
       saveAccounts(accounts);
       return sendJson(res, 200, { ok: true });
     }
@@ -608,8 +618,9 @@ async function handler(req, res) {
       }
       loginStartedAt.set(id, Date.now());
       try {
-        const child = spawn('cmd.exe', ['/k', 'claude auth login'], {
-          env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        const codex = account.provider === 'codex';
+        const child = spawn('cmd.exe', ['/k', codex ? 'codex login' : 'claude auth login'], {
+          env: { ...process.env, ...(codex ? { CODEX_HOME: configDir } : { CLAUDE_CONFIG_DIR: configDir }) },
           detached: true, stdio: 'ignore', windowsHide: false,
         });
         await new Promise((resolve, reject) => {
@@ -630,7 +641,7 @@ async function handler(req, res) {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local chat sharing requires a direct installation.' });
       if (blocked(req, res)) return;
       const body = await parseJsonBody(req);
-      const accounts = loadAccounts();
+      const accounts = claudeAccounts();
       const source = accounts.find((account) => account.id === body.sourceId);
       const target = accounts.find((account) => account.id === body.targetId);
       if (!source || !target || source.id === target.id) return sendJson(res, 400, { error: 'Choose two different accounts.' });
@@ -686,7 +697,7 @@ async function handler(req, res) {
       if (custom && (typeof body.sourceId !== 'string' || typeof body.targetId !== 'string' || body.sourceId === body.targetId)) {
         return sendJson(res, 400, { error: 'Choose two different accounts.' });
       }
-      const accounts = loadAccounts();
+      const accounts = claudeAccounts();
       const personal = accounts.find((account) => account.id === (custom ? body.sourceId : 'personal'));
       const work = accounts.find((account) => account.id === (custom ? body.targetId : 'work'));
       if (!personal || !work) {
@@ -720,11 +731,13 @@ async function handler(req, res) {
       if (!fs.existsSync(configDir)) return sendJson(res, 400, { error: 'Config folder does not exist.' });
       const key = `${id}:${body.kind}`;
       if (Date.now() - (openStartedAt.get(key) || 0) < 5000) return sendJson(res, 409, { error: 'Claude was just opened for this account.' });
-      const env = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+      const codex = account.provider === 'codex';
+      if (codex && body.kind === 'desktop') return sendJson(res, 400, { error: 'Codex has no separate Desktop profile here. Use Open Codex.' });
+      const env = { ...process.env, ...(codex ? { CODEX_HOME: configDir } : { CLAUDE_CONFIG_DIR: configDir }) };
       /** @type {[string, string[], import('node:child_process').SpawnOptions]} */
       let launch;
       if (body.kind === 'code') {
-        launch = ['cmd.exe', ['/k', 'claude'], { env, cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: false }];
+        launch = ['cmd.exe', ['/k', codex ? 'codex' : 'claude'], { env, cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: false }];
       } else {
         const profile = desktopProfileFor(configDir, os.homedir());
         if (!profile) return sendJson(res, 400, { error: 'Claude Desktop profiles exist for ~/.claude and ~/.claude-<name> folders only.' });

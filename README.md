@@ -162,3 +162,5 @@ Windows launchers write logs to `data/` (`dashboard-watchdog.log`, `dashboard-se
 API: `GET /api/health` returns `{ok, uptime, mock}` without contacting Anthropic (used by the Docker healthcheck and the watchdog). `ALLOWED_HOSTS` is case-insensitive and ignores ports. New accounts need an existing config folder.
 
 Account menu (⋮): *Open Claude Code as …* starts a terminal with `CLAUDE_CONFIG_DIR` set to that account; *Open Claude Desktop as …* starts the matching Desktop profile (`~/.claude` is the normal app, `~/.claude-<name>` is the separate profile `<Name>`).
+
+Codex (ChatGPT plan): add an account with the *Codex* service and the `~/.codex` folder. The dashboard reads the login Codex stores in `auth.json` and shows the 5-hour and weekly windows from ChatGPT's (undocumented) usage endpoint. It never renews or edits that login: when it expires, run Codex once. Codex accounts are left out of the chat, skill and plugin sync.

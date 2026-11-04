@@ -52,7 +52,7 @@ export function AccountMenu({ account, x, y, actions, emptyHint, onClose }: Prop
       onKeyDown={onKey}
     >
       <div className="font-medium">{account.name}</div>
-      <p className="mt-1 text-xs text-muted-fg">Claude Desktop login is separate. Open its profile menu, log out, then sign in to this account.</p>
+      {account.provider !== 'codex' && <p className="mt-1 text-xs text-muted-fg">Claude Desktop login is separate. Open its profile menu, log out, then sign in to this account.</p>}
       {actions.map((a) => (
         <button key={a.label} role="menuitem" tabIndex={-1} className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20 focus-visible:bg-accent/20" onClick={a.run}>
           {a.label}

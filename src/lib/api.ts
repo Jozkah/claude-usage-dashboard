@@ -63,9 +63,9 @@ async function postJson<T extends object>(url: string, fallback: string, body?: 
   return result;
 }
 
-export async function addAccount(name: string, configDir: string): Promise<string | null> {
+export async function addAccount(name: string, configDir: string, provider?: 'codex'): Promise<string | null> {
   try {
-    await postJson('/api/accounts', 'Could not add the account.', { name, configDir });
+    await postJson('/api/accounts', 'Could not add the account.', { name, configDir, ...(provider ? { provider } : {}) });
     return null;
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not add the account.';
@@ -84,9 +84,9 @@ export async function startAccountLogin(id: string): Promise<void> {
   await postJson('/api/accounts/' + encodeURIComponent(id) + '/login', 'Could not start sign-in.');
 }
 
-export async function openClaude(id: string, kind: 'code' | 'desktop', name: string): Promise<string> {
+export async function openClaude(id: string, kind: 'code' | 'desktop', name: string, app = 'Claude'): Promise<string> {
   await postJson('/api/accounts/' + encodeURIComponent(id) + '/open', 'Could not open Claude.', { kind });
-  return kind === 'code' ? `Claude Code opened in a new window as ${name}.` : `Claude Desktop is starting as ${name}.`;
+  return kind === 'code' ? `${app === 'Claude' ? 'Claude Code' : app} opened in a new window as ${name}.` : `Claude Desktop is starting as ${name}.`;
 }
 
 interface AccountSyncResult { accounts: { name?: string; id: string; chats: string; setup: Record<string, number>; errors: string[] }[] }
