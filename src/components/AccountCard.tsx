@@ -2,9 +2,10 @@ import { EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff } from 'luci
 import type { MouseEvent } from 'react';
 import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, elapsedFraction, fmtClock, fmtDur, levelFor, mainWindows, paceFor } from '../lib/format';
+import { colorVar, elapsedFraction, fmtClock, levelFor, mainWindows, paceFor } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { Chip } from './Chip';
+import { Countdown } from './Countdown';
 import { FrameCard } from './FrameCard';
 import { Ring } from './Ring';
 
@@ -17,25 +18,26 @@ interface Props {
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
   /** Opens the account action menu from a visible button (keyboard and touch friendly). */
   onMenu?: (anchor: HTMLElement) => void;
+  /** Touch long-press on the card (iOS fires no contextmenu event). */
+  onLongPress?: (x: number, y: number) => void;
 }
 
 function Gauge({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
   const { stale, retryAt } = account;
   const pace = paceFor(w, now);
   const reset = accountReset(account, w, now);
-  const countdown = reset ? fmtDur(reset.at - now) : null;
-  const previousCycle = stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now;
+  const previousCycle = w.expired || (stale && w.resetsAt && new Date(w.resetsAt).getTime() <= now);
   return (
     <div className="flex h-[300px] min-w-0 flex-col rounded-lg bg-frame/70 px-2 py-4 text-center">
       <div className="mb-3 text-[13px] font-medium">{w.label}</div>
       <Ring used={w.used} elapsed={previousCycle ? null : elapsedFraction(w, now)} stale={stale} />
       {previousCycle && <div className="mt-2 text-[11.5px] text-subtle-fg">Current usage pending</div>}
       <div className="mt-auto pt-3 text-[12.5px] text-muted-fg">
-        {countdown ? (
+        {reset ? (
           <>
-            {reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums">{countdown}</b>
+            {reset.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums"><Countdown at={reset.at} /></b>
           </>
-        ) : stale && retryAt && retryAt > now ? `Next usage check in ${fmtDur(retryAt - now)}`
+        ) : stale && retryAt && retryAt > now ? <>Next usage check in <Countdown at={retryAt} /></>
           : stale ? 'Reset needs fresh reading' : w.resetsAt ? 'Awaiting updated reset' : 'Reset time unknown'}
       </div>
       {reset && <div className="text-[11.5px] text-subtle-fg">{fmtClock(reset.at)}</div>}
@@ -77,12 +79,11 @@ function Chats({ a }: { a: Account }) {
 function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
   const { stale } = account;
   const reset = accountReset(account, w, now);
-  const countdown = reset ? fmtDur(reset.at - now) : null;
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[13px]">
         <span>{w.label}</span>
-        <span className="tabular-nums text-muted-fg">{Math.round(w.used)}% used</span>
+        <span className="tabular-nums text-muted-fg">{w.expired ? 'previous period · ' : ''}{Math.round(w.used)}% used</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-frame">
         <div
@@ -92,7 +93,7 @@ function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Accoun
       </div>
       {(w.resetsAt || stale) && (
         <div className="mt-1 text-[11.5px] text-subtle-fg">
-          {countdown ? <>{reset?.estimated ? 'Estimated reset in ' : 'Resets in '}<span className="tabular-nums">{countdown}</span></>
+          {reset ? <>{reset.estimated ? 'Estimated reset in ' : 'Resets in '}<span className="tabular-nums"><Countdown at={reset.at} /></span></>
             : stale ? 'Reset time unavailable' : 'Awaiting updated reset'}
         </div>
       )}
@@ -100,7 +101,7 @@ function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Accoun
   );
 }
 
-export function AccountCard({ account: a, now, delay, onRemove, onLogin, onContextMenu, onMenu }: Props) {
+export function AccountCard({ account: a, now, delay, onRemove, onLogin, onContextMenu, onMenu, onLongPress }: Props) {
   const [signingIn, setSigningIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const needsLogin = ['no_login', 'expired'].includes(a.authStatus ?? a.status);
@@ -128,6 +129,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   const right = (
     <div className="flex items-center gap-2">
       {a.plan && <Chip tone="accent">{a.plan}</Chip>}
+      {!a.plan && a.planUnknown && <span title="Plan not detected yet, so some limits may be missing until the next live reading"><Chip tone="mute">Plan unknown</Chip></span>}
       {onMenu && (
         <button
           onClick={(e) => { e.stopPropagation(); onMenu(e.currentTarget); }}
@@ -147,7 +149,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
     const Icon = a.status === 'no_login' || a.status === 'expired' ? KeyRound : a.status === 'error' ? WifiOff : TriangleAlert;
     const message = a.message || (a.status === 'ok' ? 'The server returned no usage windows for this account yet. It will retry on the next poll.' : 'No details were reported. It will retry on the next poll.');
     return (
-      <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay} onContextMenu={onContextMenu}>
+      <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay} onContextMenu={onContextMenu} onLongPress={onLongPress}>
         <div className="flex gap-3 p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/12 text-warn"><Icon className="size-4" /></div>
           <div className="min-w-0">
@@ -176,6 +178,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
       beam={critical}
       bodyClassName="flex"
       onContextMenu={onContextMenu}
+      onLongPress={onLongPress}
     >
       <div className="flex min-w-0 flex-1 flex-col p-3">
         <div className={`grid gap-3 ${main.length === 1 && !weeklyPending ? 'grid-cols-1' : 'grid-cols-2'}`}>

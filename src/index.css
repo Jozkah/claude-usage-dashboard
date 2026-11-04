@@ -142,6 +142,15 @@ body {
 .live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--good); }
 .live-dot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--good); animation: ping-dot 2s ease-out infinite; }
 
+/* Border beam: paused while its card is off screen (IntersectionObserver in FrameCard) */
+.beam-off::after { animation-play-state: paused; }
+
+/* User setting "Background effects" off (class set by useEffectsPref): no glow, beam, pulse or blur */
+html.no-fx .aurora-root { display: none; }
+html.no-fx .beam::after, html.no-fx .live-dot::after { display: none; }
+html.no-fx .shiny { animation: none; background: none; color: var(--fg); }
+html.no-fx .backdrop-blur-xl, html.no-fx .backdrop-blur-\[3px\] { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
 /* Pause every running animation while the tab is hidden (class set in App) */
 html.page-hidden *, html.page-hidden *::before, html.page-hidden *::after { animation-play-state: paused !important; }
 

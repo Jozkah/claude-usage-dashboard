@@ -1,39 +1,49 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Point, RangeKey, TokenReport, UsageResponse } from './types';
 
 const TIMEOUT_MS = 30_000;
 
-/** fetch with a hard timeout so one hung request cannot block polling forever. */
+/** True for a request we cancelled ourselves (superseded poll, unmount, stale history). */
+export const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
+
+/** fetch with a hard timeout so one hung request cannot block polling forever; honours a caller `signal`. */
 async function fetchTimeout(url: string, init: RequestInit = {}, ms = TIMEOUT_MS): Promise<Response> {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), ms);
+  const outer = init.signal;
+  const onOuter = () => ctl.abort();
+  if (outer?.aborted) ctl.abort();
+  else outer?.addEventListener('abort', onOuter, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, ms);
   try {
     return await fetch(url, { ...init, signal: ctl.signal });
   } catch (e) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw new Error('Request timed out');
+    if (timedOut && isAbort(e)) throw new Error('Request timed out');
     throw e;
   } finally {
     clearTimeout(timer);
+    outer?.removeEventListener('abort', onOuter);
   }
 }
 
-export async function fetchUsage(force = false): Promise<UsageResponse> {
-  const res = await fetchTimeout('/api/usage' + (force ? '?force=1' : ''), { cache: 'no-store' });
+async function fetchUsage(force: boolean, signal?: AbortSignal): Promise<UsageResponse> {
+  const res = await fetchTimeout('/api/usage' + (force ? '?force=1' : ''), { cache: 'no-store', signal });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
 
 /** Throws on a failed request so callers can tell an error from an empty series. */
-export async function fetchHistory(id: string, key: string, range: RangeKey): Promise<Point[]> {
+async function fetchHistory(id: string, key: string, range: RangeKey, since?: number, signal?: AbortSignal): Promise<Point[]> {
   const q = new URLSearchParams({ id, key, range });
-  const res = await fetchTimeout('/api/history?' + q.toString(), { cache: 'no-store' });
+  if (since !== undefined) q.set('since', String(since)); // servers without `since` ignore it and send the whole range
+  const res = await fetchTimeout('/api/history?' + q.toString(), { cache: 'no-store', signal });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const j = (await res.json()) as { points?: Point[] };
   return j.points ?? [];
 }
 
-export async function fetchTokens(days = 90): Promise<TokenReport> {
-  const res = await fetchTimeout(`/api/tokens?days=${days}`, { cache: 'no-store' });
+export async function fetchTokens(days = 90, signal?: AbortSignal): Promise<TokenReport> {
+  const res = await fetchTimeout(`/api/tokens?days=${days}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return (await res.json()) as TokenReport;
 }
@@ -44,7 +54,9 @@ const REFUSED = 'The dashboard server refused the request.';
 async function postJson<T extends object>(url: string, fallback: string, body?: unknown): Promise<T> {
   const res = await fetchTimeout(url, {
     method: 'POST',
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    // the server requires a JSON content type on every POST, with or without a body
+    headers: { 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const result = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(result.error || (res.status === 403 ? REFUSED : fallback));
@@ -88,44 +100,70 @@ export async function syncDesktopLabels(): Promise<string> {
   return `Synced ${result.titles ?? 0} chat names, ${result.groups ?? 0} groups, ${result.assignments ?? 0} group assignments. Reopen Claude Desktop profiles to refresh their sidebars.`;
 }
 
-export async function syncCodeSetup(): Promise<string> {
-  const result = await postJson<{ plugins?: number }>('/api/code-setup/sync', 'Could not sync local Claude Code setup.');
-  return `Copied ${result.plugins ?? 0} local plugins plus missing skills to Work. Restart Claude Code or Desktop to reload them.`;
+export async function syncCodeSetup(sourceId?: string, targetId?: string, targetName = 'the target account'): Promise<string> {
+  const body = sourceId && targetId ? { sourceId, targetId } : undefined;
+  const result = await postJson<{ plugins?: number }>('/api/code-setup/sync', 'Could not sync local Claude Code setup.', body);
+  return `Copied ${result.plugins ?? 0} local plugins plus missing skills to ${targetName}. Restart Claude Code or Desktop to reload them.`;
 }
+
+const STALL_MS = 8_000;
 
 /** Polls the API every 15 s while the tab is visible; `refresh(true)` forces a fresh reading. */
 export function useUsage() {
   const [data, setData] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stalled, setStalled] = useState(false);
   const [lastLoad, setLastLoad] = useState(0);
   const busy = useRef(false);
+  const inflight = useRef<{ ctl: AbortController; force: boolean } | null>(null);
   const pendingForce = useRef(false);
 
   const refresh = useCallback(async (force = false) => {
     if (busy.current) {
-      // never drop a user-initiated refresh: run it once the in-flight request ends
-      if (force) pendingForce.current = true;
+      // never drop a user-initiated refresh: it supersedes a background poll, or runs once a forced one ends
+      if (force) {
+        pendingForce.current = true;
+        if (inflight.current && !inflight.current.force) inflight.current.ctl.abort();
+      }
       return;
     }
     busy.current = true;
+    const ctl = new AbortController();
+    inflight.current = { ctl, force };
     if (force) setLoading(true); // background polls stay silent
+    const stall = setTimeout(() => setStalled(true), STALL_MS);
+    const mine = () => inflight.current?.ctl === ctl; // false once unmount/remount reset the state
     try {
-      const d = await fetchUsage(force);
+      const d = await fetchUsage(force, ctl.signal);
+      if (!mine()) return;
       setData(d);
       setError(null);
       setLastLoad(Date.now());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Server not reachable');
+      // an abort is a newer request or unmount superseding this one: not a failure
+      if (!isAbort(e) && mine()) setError(e instanceof Error ? e.message : 'Server not reachable');
     } finally {
-      busy.current = false;
-      setLoading(false);
-      if (pendingForce.current) {
-        pendingForce.current = false;
-        void refresh(true);
+      clearTimeout(stall);
+      if (mine()) {
+        inflight.current = null;
+        busy.current = false;
+        setStalled(false);
+        if (pendingForce.current) {
+          pendingForce.current = false;
+          void refresh(true); // keeps the spinner on
+        } else setLoading(false);
       }
     }
   }, []);
+
+  /** Abandon the request in flight (if any) and ask again, forcing a fresh reading. */
+  const restart = useCallback(() => {
+    if (busy.current) {
+      pendingForce.current = true;
+      inflight.current?.ctl.abort();
+    } else void refresh(true);
+  }, [refresh]);
 
   useEffect(() => {
     void refresh(false);
@@ -134,43 +172,105 @@ export function useUsage() {
     document.addEventListener('visibilitychange', poll);
     window.addEventListener('focus', poll);
     return () => {
+      inflight.current?.ctl.abort();
+      inflight.current = null; // lets a remount (StrictMode) start its own request
+      busy.current = false;
+      pendingForce.current = false;
       clearInterval(id);
       document.removeEventListener('visibilitychange', poll);
       window.removeEventListener('focus', poll);
     };
   }, [refresh]);
 
-  return { data, loading, error, lastLoad, refresh };
+  return { data, loading, error, stalled, lastLoad, refresh, restart };
 }
 
-/** Re-renders every `ms` milliseconds and returns the current time. Pauses while the tab is hidden. */
+/** One shared interval per period, so a hundred countdowns cost one timer. Paused while the tab is hidden. */
+function makeTicker(ms: number) {
+  let value = Date.now();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const subs = new Set<() => void>();
+  const tick = () => {
+    if (document.hidden) return;
+    value = Date.now();
+    subs.forEach((f) => f());
+  };
+  return {
+    subscribe(f: () => void) {
+      subs.add(f);
+      if (!timer) {
+        tick();
+        timer = setInterval(tick, ms);
+        document.addEventListener('visibilitychange', tick);
+      }
+      return () => {
+        subs.delete(f);
+        if (!subs.size && timer) {
+          clearInterval(timer);
+          timer = undefined;
+          document.removeEventListener('visibilitychange', tick);
+        }
+      };
+    },
+    get() {
+      // with nobody subscribed the cached value goes stale: refresh it, but stay stable within one render
+      if (!timer && Date.now() - value > 250) value = Date.now();
+      return value;
+    },
+  };
+}
+const tickers = new Map<number, ReturnType<typeof makeTicker>>();
+
+/** Re-renders every `ms` milliseconds and returns the current time. Only the component that calls it re-renders. */
 export function useNow(ms = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const tickNow = () => { if (!document.hidden) setNow(Date.now()); };
-    const id = setInterval(tickNow, ms);
-    document.addEventListener('visibilitychange', tickNow);
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tickNow); };
-  }, [ms]);
-  return now;
+  let t = tickers.get(ms);
+  if (!t) tickers.set(ms, (t = makeTicker(ms)));
+  return useSyncExternalStore(t.subscribe, t.get);
 }
 
 interface HistoryState { k: string; points: Point[]; ready: boolean; error: boolean }
 
-/** History for one window of one account; reloads when `tick` changes. Pass no id to skip fetching. */
+const SPAN: Record<RangeKey, number> = { '6h': 6 * 3600e3, '24h': 24 * 3600e3, '7d': 7 * 864e5 };
+const FULL_EVERY = 20; // reload the whole range after this many increments, since the server downsamples
+
+/**
+ * Merge a `since` response into the points we already have: whatever the server returned replaces
+ * everything from its first timestamp on, and points older than the range are dropped.
+ */
+export function mergeHistory(prev: Point[], next: Point[], cutoff: number): Point[] {
+  if (!next.length) return prev.filter((p) => p[0] >= cutoff);
+  const from = next[0][0];
+  return [...prev.filter((p) => p[0] < from && p[0] >= cutoff), ...next];
+}
+
+/**
+ * History for one window of one account; reloads when `tick` changes. Pass no id to skip fetching.
+ * Later reloads of the same series ask the server only for points since the last one (`since`).
+ */
 export function useHistory(id: string | undefined, key: string | undefined, range: RangeKey, tick: number) {
   const k = id && key ? `${id}:${key}:${range}` : '';
   const [state, setState] = useState<HistoryState>({ k: '', points: [], ready: false, error: false });
+  const last = useRef<{ k: string; points: Point[]; inc: number } | null>(null);
   const [retryN, setRetryN] = useState(0);
   useEffect(() => {
     if (!k || !id || !key) return;
-    let live = true;
-    fetchHistory(id, key, range)
-      .then((p) => { if (live) setState({ k, points: p, ready: true, error: false }); })
-      .catch(() => { if (live) setState((s) => ({ k, points: s.k === k ? s.points : [], ready: true, error: true })); });
-    return () => { live = false; };
+    const ctl = new AbortController();
+    const prev = last.current?.k === k ? last.current : null;
+    const since = prev && prev.points.length && prev.inc < FULL_EVERY ? prev.points[prev.points.length - 1][0] : undefined;
+    fetchHistory(id, key, range, since, ctl.signal)
+      .then((p) => {
+        if (ctl.signal.aborted) return;
+        const points = since !== undefined && prev ? mergeHistory(prev.points, p, Date.now() - SPAN[range]) : p;
+        last.current = { k, points, inc: since !== undefined && prev ? prev.inc + 1 : 0 };
+        setState({ k, points, ready: true, error: false });
+      })
+      .catch((e) => {
+        if (ctl.signal.aborted || isAbort(e)) return;
+        setState((s) => ({ k, points: s.k === k ? s.points : [], ready: true, error: true }));
+      });
+    return () => ctl.abort();
   }, [k, id, key, range, tick, retryN]);
-  const retry = useCallback(() => setRetryN((n) => n + 1), []);
+  const retry = useCallback(() => { last.current = null; setRetryN((n) => n + 1); }, []);
   // a different series than the one loaded: show the loading state, never the previous data
   if (!k) return { points: [] as Point[], ready: true, error: false, retry };
   if (state.k !== k) return { points: [] as Point[], ready: false, error: false, retry };

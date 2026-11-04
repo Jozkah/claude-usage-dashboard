@@ -78,3 +78,24 @@ export function mainWindows(a: Account): UsageWindow[] {
   const main = ws.filter((w) => w.key === 'five_hour' || w.key === 'seven_day');
   return main.length ? main : ws.slice(0, 2);
 }
+
+/** Friendly model name from an API id (handles Bedrock/Vertex prefixes, dated and legacy ids). */
+const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
+export function modelName(id: string): string {
+  const clean = id
+    .replace(/^(?:[a-z]{2}\.)?anthropic\./i, '') // bedrock prefixes, optionally with a region
+    .replace(/-v\d+(?::\d+)?$/i, '')
+    .replace(/@\d{8}$/, '')
+    .replace(/-(?:\d{8}|latest)$/, '');
+  const fmt = (family: string, version: string, rest: string) => {
+    const suffix = rest.replace(/^-/, '').replace(/-/g, ' ');
+    return `Claude ${cap(family)} ${version}${suffix ? ` ${suffix}` : ''}`;
+  };
+  const legacy = /^claude-(\d+)-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-5-sonnet
+  if (legacy) return fmt(legacy[3], `${legacy[1]}.${legacy[2]}`, legacy[4]);
+  const old = /^claude-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-opus
+  if (old) return fmt(old[2], old[1], old[3]);
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean); // claude-sonnet-4-5
+  if (!match) return id === 'unknown' ? 'Unknown model' : id;
+  return fmt(match[1], match[3] ? `${match[2]}.${match[3]}` : match[2], match[4]);
+}

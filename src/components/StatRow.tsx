@@ -1,9 +1,10 @@
 import { Clock, Flame, Trophy, Users } from 'lucide-react';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, fmtDur, headroom, levelFor, mainWindows, windowLength } from '../lib/format';
+import { colorVar, headroom, levelFor, mainWindows, windowLength } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { useHistory } from '../lib/api';
 import { AnimatedNumber } from './AnimatedNumber';
+import { Countdown } from './Countdown';
 import { FrameCard } from './FrameCard';
 import { Sparkline } from './Sparkline';
 
@@ -28,7 +29,7 @@ export function StatRow({ accounts, now, tick }: Props) {
 
   // tightest single window
   let tight: { acc: Account; w: UsageWindow } | null = null;
-  for (const a of ok) for (const w of a.windows ?? []) if (!tight || w.used > tight.w.used) tight = { acc: a, w };
+  for (const a of ok) for (const w of a.windows ?? []) if (!w.expired && (!tight || w.used > tight.w.used)) tight = { acc: a, w };
 
   // soonest reset
   let next: { acc: Account; w: UsageWindow; at: number; estimated: boolean } | null = null;
@@ -103,7 +104,7 @@ export function StatRow({ accounts, now, tick }: Props) {
       <FrameCard icon={<Icon><Clock /></Icon>} title="Next reset" delay={210}>
         <Body>
           <div>
-            <div className="text-[32px] leading-none font-semibold tracking-tight tabular-nums">{next ? fmtDur(next.at - now) : '—'}</div>
+            <div className="text-[32px] leading-none font-semibold tracking-tight tabular-nums">{next ? <Countdown at={next.at} /> : '—'}</div>
             <div className="mt-2 truncate text-xs text-muted-fg">{next ? `${next.acc.name} · ${next.w.label}${next.estimated ? ' · estimated' : ''}` : 'Reset time unavailable'}</div>
           </div>
           {next ? <div className="text-[11px] text-subtle-fg">Reset window elapsed</div> : null}

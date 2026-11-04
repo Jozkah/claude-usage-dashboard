@@ -3,7 +3,7 @@ export function Aurora() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 -z-0 overflow-hidden"
+      className="aurora-root pointer-events-none fixed inset-0 -z-0 overflow-hidden"
       style={{ opacity: 'var(--aurora-opacity)' }}
     >
       <div className="aurora-blob" style={{ width: '46vw', height: '46vw', left: '-8vw', top: '-18vw', background: 'color-mix(in srgb, var(--accent) 70%, transparent)', animation: 'float-a 26s ease-in-out infinite' }} />

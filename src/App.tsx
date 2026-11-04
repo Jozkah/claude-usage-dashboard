@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { WifiOff, X } from 'lucide-react';
+import { Hourglass, WifiOff, X } from 'lucide-react';
 import { removeAccount, shareLocalChats, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
-import { fmtAgo } from './lib/format';
+import { useEffectsPref } from './lib/effects';
+import { trapTab } from './lib/keyboard';
 import type { Account, RangeKey } from './lib/types';
 import { Aurora } from './components/Aurora';
 import { Header } from './components/Header';
@@ -16,16 +17,20 @@ import { AccountMenu, type MenuAction } from './components/AccountMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LimitTable } from './components/LimitTable';
 import { DailyUsage } from './components/DailyUsage';
+import { Ago } from './components/Countdown';
+import { SyncSetupDialog } from './components/SyncSetupDialog';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { Modal } from './components/Modal';
 
 type WithInert = HTMLElement & { inert?: boolean };
 
 export default function App() {
-  const { data, loading, error, lastLoad, refresh } = useUsage();
-  const now = useNow(1000);
+  const { data, loading, error, stalled, lastLoad, refresh, restart } = useUsage();
+  // coarse clock for sorting and reset detection; per-second countdown text lives in <Countdown> leaves
+  const now = useNow(30_000);
   const { dark, toggle } = useTheme();
   const notify = useNotifyPref();
+  const effects = useEffectsPref();
 
   const [selected, setSelected] = useState('all');
   const [range, setRange] = useState<RangeKey>('24h');
@@ -37,6 +42,7 @@ export default function App() {
   const [removeError, setRemoveError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [contextAccount, setContextAccount] = useState<{ account: Account; x: number; y: number } | null>(null);
+  const [setup, setSetup] = useState<{ open: boolean; sourceId: string; targetId: string }>({ open: false, sourceId: '', targetId: '' });
   const [notice, setNotice] = useState<string | null>(null);
   const drawer = useRef<HTMLElement>(null);
 
@@ -88,7 +94,8 @@ export default function App() {
       { label: 'Sync local Desktop chats across profiles', run: () => void runAction(syncDesktopChats, 'Could not sync Desktop sessions.') },
       { label: 'Sync Desktop chat names and groups', run: () => void runAction(syncDesktopLabels, 'Could not sync Desktop names and groups.') },
     ];
-    if (target.id === 'work') out.push({ label: 'Copy local Code plugins and skills to Work', run: () => void runAction(syncCodeSetup, 'Could not sync local Claude Code setup.') });
+    const from = accounts.find((a) => a.id === 'personal' && a.id !== target.id) ?? source;
+    out.push({ label: 'Copy local Code plugins and skills…', run: () => { setContextAccount(null); setSetup({ open: true, sourceId: from.id, targetId: target.id }); } });
     return out;
   };
 
@@ -153,13 +160,21 @@ export default function App() {
     if (!menuOpen && !requested) return;
     const opener = document.activeElement as HTMLElement | null;
     const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-account-search]'));
-    inputs.find((el) => el.getClientRects().length > 0 && el.getBoundingClientRect().right > 0)?.focus();
-    return () => { if (menuOpen && opener && document.contains(opener)) opener.focus(); };
+    inputs.find((el) => el.getClientRects().length > 0 && !el.closest('[inert]'))?.focus(); // the visible copy, not the hidden or inert one
+    return () => {
+      if (!menuOpen) return;
+      // Safari does not focus a button on click, so fall back to the Menu button itself
+      const back = opener && opener !== document.body ? opener : document.querySelector<HTMLElement>('button[aria-controls="mobile-sidebar"]');
+      if (back && document.contains(back)) back.focus();
+    };
   }, [menuOpen, searchReq]);
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+      else trapTab(e, drawer.current); // Tab / Shift+Tab wrap inside the open drawer
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
@@ -169,6 +184,12 @@ export default function App() {
   const onAdded = useCallback(() => void refresh(true), [refresh]);
   const closeRemove = useCallback(() => { setToRemove(null); setRemoveError(''); }, []);
   const closeContext = useCallback(() => setContextAccount(null), []);
+  const closeSetup = useCallback(() => setSetup((s) => ({ ...s, open: false })), []);
+  const runSetup = useCallback((sourceId: string, targetId: string) => {
+    const name = accounts.find((a) => a.id === targetId)?.name;
+    setSetup((s) => ({ ...s, open: false }));
+    void runAction(() => syncCodeSetup(sourceId, targetId, name), 'Could not sync local Claude Code setup.');
+  }, [accounts]);
 
   const confirmRemove = async () => {
     if (!toRemove || removing) return;
@@ -190,7 +211,7 @@ export default function App() {
   const sidebar = (
     <Sidebar
       accounts={accounts} selected={selected} onSelect={select} onAdd={() => { setAddOpen(true); setMenuOpen(false); }}
-      search={search} onSearch={setSearch} lastLoad={lastLoad} now={now} mock={!!data?.mock}
+      search={search} onSearch={setSearch} lastLoad={lastLoad} mock={!!data?.mock}
     />
   );
 
@@ -219,7 +240,7 @@ export default function App() {
       <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-y-auto">
         <Header
           crumb={crumb} dark={dark} loading={loading} onToggleTheme={toggle} onRefresh={() => void refresh(true)}
-          onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} notify={notify}
+          onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} notify={notify} effects={effects}
         />
 
         <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-7 pb-14 sm:px-6">
@@ -235,9 +256,19 @@ export default function App() {
               <WifiOff className="size-4 shrink-0 text-bad" />
               <span className="min-w-0 flex-1">
                 The dashboard server isn’t reachable ({error}).
-                {data && lastLoad ? ` Showing the last reading from ${fmtAgo(now - lastLoad)}.` : ''}
+                {data && lastLoad ? <> Showing the last reading from <Ago since={lastLoad} />.</> : null}
               </span>
               <button onClick={() => void refresh(true)} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium transition-colors hover:border-accent/50">Retry</button>
+            </div>
+          )}
+
+          {stalled && !error && (
+            <div role="status" className="animate-rise mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+              <Hourglass className="size-4 shrink-0 text-warn" />
+              <span className="min-w-0 flex-1">
+                The dashboard server is slow to answer.{data && lastLoad ? <> Showing the last reading from <Ago since={lastLoad} />.</> : ' Still waiting for the first reading.'}
+              </span>
+              <button onClick={restart} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium transition-colors hover:border-accent/50">Cancel and retry</button>
             </div>
           )}
 
@@ -276,7 +307,7 @@ export default function App() {
                   <ErrorBoundary key={a.id} label={a.name}>
                     <AccountCard
                       account={a} now={now} delay={i * 80} onRemove={setToRemove} onLogin={signInForUsage}
-                      onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)}
+                      onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)} onLongPress={(x, y) => openMenuAt(a, x, y)}
                     />
                   </ErrorBoundary>
                 ))}
@@ -311,6 +342,8 @@ export default function App() {
           onClose={closeContext}
         />
       )}
+
+      <SyncSetupDialog open={setup.open} accounts={accounts} defaultSourceId={setup.sourceId} defaultTargetId={setup.targetId} onClose={closeSetup} onRun={runSetup} />
 
       <Modal open={!!toRemove} onClose={closeRemove} title="Remove account?">
         <p className="text-sm text-muted-fg">

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Loader2 } from 'lucide-react';
 import { fetchTokens } from '../lib/api';
+import { modelName } from '../lib/format';
 import type { DayUsage, NamedShare, TokenReport } from '../lib/types';
 import { FrameCard } from './FrameCard';
 
@@ -11,10 +12,11 @@ function useTokens() {
   useEffect(() => {
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
+    const ctl = new AbortController();
     const load = async () => {
       let wait = 60_000;
       try {
-        const j = await fetchTokens(90);
+        const j = await fetchTokens(90, ctl.signal);
         if (!stop) { setReport(j); setError(null); }
         if (j.scanning || !j.ready) wait = 5_000;
       } catch (e) {
@@ -24,7 +26,7 @@ function useTokens() {
       if (!stop) timer = setTimeout(load, wait);
     };
     void load();
-    return () => { stop = true; clearTimeout(timer); };
+    return () => { stop = true; ctl.abort(); clearTimeout(timer); };
   }, [attempt]);
   return { report, error, retry: () => setAttempt((n) => n + 1) };
 }
@@ -32,26 +34,7 @@ function useTokens() {
 const tok = (n: number) =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
 const usd = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
-const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
-export function modelName(id: string): string {
-  const clean = id
-    .replace(/^(?:[a-z]{2}\.)?anthropic\./i, '') // bedrock prefixes, optionally with a region
-    .replace(/-v\d+(?::\d+)?$/i, '')
-    .replace(/@\d{8}$/, '')
-    .replace(/-(?:\d{8}|latest)$/, '');
-  const fmt = (family: string, version: string, rest: string) => {
-    const suffix = rest.replace(/^-/, '').replace(/-/g, ' ');
-    return `Claude ${cap(family)} ${version}${suffix ? ` ${suffix}` : ''}`;
-  };
-  const legacy = /^claude-(\d+)-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-5-sonnet
-  if (legacy) return fmt(legacy[3], `${legacy[1]}.${legacy[2]}`, legacy[4]);
-  const old = /^claude-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-opus
-  if (old) return fmt(old[2], old[1], old[3]);
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean); // claude-sonnet-4-5
-  if (!match) return id === 'unknown' ? 'Unknown model' : id;
-  return fmt(match[1], match[3] ? `${match[2]}.${match[3]}` : match[2], match[4]);
-}
-
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const pad = (n: number) => String(n).padStart(2, '0');
 const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 /** Pure calendar arithmetic on YYYY-MM-DD strings, so no browser time zone gets involved. */
@@ -117,7 +100,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
     // the server buckets days in its own time zone: anchor on its calendar, not the browser's
     const latest = [...byDate.keys()].sort().pop() ?? '';
     const local = key(new Date());
-    const today = report?.today ?? (latest > local ? latest : local);
+    const today = report?.today && DAY.test(report.today) ? report.today : latest > local ? latest : local;
     for (let i = range - 1; i >= 0; i--) {
       const k = addDays(today, -i);
       list.push({ date: k, d: byDate.get(k) });
