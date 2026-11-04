@@ -9,18 +9,21 @@
     "dev": "concurrently -k -n api,web -c gray,cyan \"cross-env NO_OPEN=1 node --watch server/index.js\" \"cross-env NODE_ENV=development vite\"",
     "dev:mock": "cross-env MOCK=1 npm run dev",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test server/*.test.js",
+    "test": "node scripts/run-tests.mjs",
+    "test:coverage": "node scripts/run-tests.mjs --experimental-test-coverage",
     "start": "node server/index.js",
     "start:mock": "cross-env MOCK=1 node server/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.0",
-    "classic-level": "^3.0.0",
     "lucide-react": "^0.468.0",
     "motion": "^11.15.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
+  },
+  "optionalDependencies": {
+    "classic-level": "^3.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

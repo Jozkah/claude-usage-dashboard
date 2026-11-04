@@ -1,6 +1,13 @@
 node_modules
 dist
 .git
+.claude
+.github
+issues
+data
+assets
+.env
+.env.*
 *.log
 .DS_Store
 Dockerfile

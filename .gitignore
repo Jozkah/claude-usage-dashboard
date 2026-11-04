@@ -1,5 +1,8 @@
 node_modules
 dist
-.git
+data/
+.env
+.env.*
+.claude/
 *.log
 .DS_Store

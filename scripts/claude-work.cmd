@@ -4,16 +4,16 @@ rem Pass --cli to open interactive Work Claude Code, or pass CLI arguments direc
 setlocal
 set "CLAUDE_CONFIG_DIR=%USERPROFILE%\.claude-work"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-work.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-profile.ps1" -Name Work
 if errorlevel 1 (
-  echo Could not start Claude Desktop Work profile.
+  echo Could not start Claude Desktop Work profile. See data\launcher.log.
   exit /b 1
 )
 
 if /i "%~1"=="--cli" (
-  call claude
+  claude
   goto :done
 )
-if not "%~1"=="" call claude %*
+if not "%~1"=="" claude %*
 :done
 endlocal
