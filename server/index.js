@@ -32,12 +32,14 @@ import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, stream
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
   credentialsExpired } from './account-utils.js';
 import { createSessionReader } from './sessions.js';
-import { readCredentials } from './credentials.js';
+import { readCredentials, refreshCredentials } from './credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, '..', 'dist');
 
 const PORT = Number(process.env.PORT || 4777);
+const NO_REFRESH = process.env.DASHBOARD_NO_REFRESH === '1';
+const EXPIRED_MESSAGE = 'Login expired and could not be renewed automatically. Use "Sign in for usage" or open Claude Code with this account.';
 const HOST = process.env.HOST || '127.0.0.1';
 const MOCK = process.env.MOCK === '1';
 const DATA_DIR = process.env.DATA_DIR || os.homedir();
@@ -207,25 +209,37 @@ async function fetchStatus(acc) {
   if (!creds || !creds.accessToken) {
     return { ...base, status: 'no_login', message: 'No Claude Code login found in this config folder. Claude Desktop can be signed in separately.' };
   }
+  const configDir = expandHome(acc.configDir);
+  // Renew a stale access token ourselves (disable with DASHBOARD_NO_REFRESH=1); Claude Code only does it when it runs.
+  const renew = async () => (NO_REFRESH ? null : refreshCredentials(configDir, creds));
+  if (credentialsExpired(creds, Date.now())) {
+    const fresh = await renew();
+    if (fresh && fresh.accessToken) creds = { ...creds, ...fresh };
+  }
   const plan = planLabel(creds);
   if (credentialsExpired(creds, Date.now())) {
-    return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
+    return { ...base, plan, status: 'expired', message: EXPIRED_MESSAGE };
   }
   // One timeout covers connecting AND reading the body.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {
-    const res = await fetch(USAGE_URL, {
+    const call = (token) => fetch(USAGE_URL, {
       headers: {
-        Authorization: 'Bearer ' + creds.accessToken,
+        Authorization: 'Bearer ' + token,
         'anthropic-beta': 'oauth-2025-04-20',
         'Content-Type': 'application/json',
         'User-Agent': 'claude-usage-dashboard/1.0',
       },
       signal: controller.signal,
     });
+    let res = await call(creds.accessToken);
+    if (res.status === 401) { // rejected token (revoked or clock skew): one renewal attempt, then retry once
+      const fresh = await renew();
+      if (fresh && fresh.accessToken && fresh.accessToken !== creds.accessToken) res = await call(fresh.accessToken);
+    }
     if (res.status === 401) {
-      return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
+      return { ...base, plan, status: 'expired', message: EXPIRED_MESSAGE };
     }
     if (res.status === 403) {
       return { ...base, plan, status: 'error', message: 'Usage endpoint refused the login (HTTP 403). Re-login may not help; the login may lack access or be blocked.' };

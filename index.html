@@ -6,17 +6,7 @@
     <meta name="theme-color" content="#f8f8f8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Claude usage</title>
-    <script>
-      // Apply the saved theme before first paint to avoid a flash.
-      try {
-        var t = localStorage.getItem('cud-theme');
-        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        if (t === 'dark') {
-          document.documentElement.classList.add('dark');
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#09090b');
-        }
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

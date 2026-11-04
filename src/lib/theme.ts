@@ -15,7 +15,10 @@ function saved(): 'dark' | 'light' | null {
 }
 
 export function useTheme() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const [dark, setDark] = useState(() => {
+    const t = saved();
+    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  });
 
   // keep the DOM (class + theme-color meta) in step with state
   useEffect(() => { apply(dark); }, [dark]);
