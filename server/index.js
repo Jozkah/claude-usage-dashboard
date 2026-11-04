@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync, execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
@@ -28,9 +28,11 @@ import { syncMergedDesktopLabelsMany, desktopLabelSyncStatus } from './desktop-l
 import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
-  parseAllowedHosts, hostAllowed, originAllowed, tokenOk, SECURITY_HEADERS } from './http-utils.js';
+  parseAllowedHosts, hostAllowed, guardMutation, SECURITY_HEADERS } from './http-utils.js';
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
-  sessionFileFresh, credentialsExpired } from './account-utils.js';
+  credentialsExpired } from './account-utils.js';
+import { createSessionReader } from './sessions.js';
+import { readCredentials } from './credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, '..', 'dist');
@@ -51,8 +53,8 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 55 * 1000;
 const DESKTOP_SYNC_MS = 10 * 1000;
 const DESKTOP_AUTO_SYNC = process.platform === 'win32' && !MOCK && !ACCOUNTS_DIR && process.env.DESKTOP_AUTO_SYNC !== '0';
-let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, copied: {}, repaired: 0, branchesAligned: 0 };
-let labelSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, waiting: false };
+let desktopSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, copied: {}, deleted: 0, repaired: 0, branchesAligned: 0 };
+let labelSyncStatus = { enabled: DESKTOP_AUTO_SYNC, lastRun: null, lastError: null, waiting: false, skippedScopes: [] };
 let labelSyncBusy = false;
 
 function desktopProfileState(profiles = findWindowsDesktopProfiles()) {
@@ -81,6 +83,7 @@ const loginStartedAt = new Map(); // accountId -> ms of last sign-in launch
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
+const UPSTREAM_TIMEOUT_MS = 20 * 1000;
 
 /* ------------------------------------------------------------------ */
 /* accounts                                                            */
@@ -147,30 +150,6 @@ function saveAccounts(accounts) {
 /* reading the login (never leaves this process)                       */
 /* ------------------------------------------------------------------ */
 
-function readCredentials(configDir) {
-  const file = path.join(configDir, '.credentials.json');
-  try {
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (j && j.claudeAiOauth) return j.claudeAiOauth;
-  } catch { /* try the keychain next */ }
-
-  if (process.platform === 'darwin') {
-    const isDefault = path.resolve(configDir) === path.join(os.homedir(), '.claude');
-    const service = isDefault
-      ? 'Claude Code-credentials'
-      // Best effort: Claude Code suffixes the keychain item for custom config folders.
-      : 'Claude Code-credentials-' + crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8);
-    try {
-      const out = execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
-      });
-      const j = JSON.parse(out.trim());
-      if (j && j.claudeAiOauth) return j.claudeAiOauth;
-    } catch { /* not found */ }
-  }
-  return null;
-}
-
 function planLabel(c) {
   const t = String(c.subscriptionType || '').toLowerCase();
   if (!t) return null;
@@ -212,53 +191,17 @@ function parseWindows(data) {
   return out;
 }
 
-/* Open Claude Code chats for one account. Claude Code writes <configDir>/sessions/<pid>.json
-   for every running session and touches it while the chat is working. */
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; }
-}
+/* Open Claude Code chats per account: async, cached 3 s per config folder, files older than 24 h count as dead. */
+const readSessions = createSessionReader({ inContainer: Boolean(ACCOUNTS_DIR) }); // host pids are not visible in Docker
 
-function readSessions(configDir) {
-  const dir = path.join(configDir, 'sessions');
-  let files;
-  try { files = fs.readdirSync(dir).filter((f) => /^\d+\.json$/.test(f)); } catch { return []; }
-  const inContainer = Boolean(ACCOUNTS_DIR); // pids from the host are not visible inside Docker
-  const out = [];
-  for (const f of files) {
-    try {
-      const file = path.join(dir, f);
-      const mtime = fs.statSync(file).mtimeMs;
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const state = activeSessionState(j.status);
-      if (!state) continue;
-      const alive = inContainer ? Date.now() - mtime < 10 * 60 * 1000
-        : sessionFileFresh(j.pid, mtime, Date.now()) && pidAlive(j.pid);
-      if (!alive) continue;
-      out.push({
-        id: String(j.sessionId || j.pid),
-        name: String(j.name || '').slice(0, 80) || null,
-        folder: String(j.cwd || '').split(/[\\/]/).filter(Boolean).pop() || null,
-        where: String(j.entrypoint || '').replace(/^claude-/, '') || null,
-        startedAt: Number(j.startedAt) || null,
-        lastActiveAt: mtime,
-        state,
-        working: state === 'busy',
-      });
-    } catch { /* unreadable file: ignore */ }
-  }
-  out.sort((a, b) => Number(b.working) - Number(a.working) || b.lastActiveAt - a.lastActiveAt);
-  return out;
-}
-
-function safeSessions(acc) {
-  try { return readSessions(expandHome(acc.configDir)); } catch { return []; }
+async function safeSessions(acc) {
+  try { return await readSessions(expandHome(acc.configDir)); } catch { return []; }
 }
 
 async function fetchStatus(acc) {
   const base = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now() };
   let creds;
-  try { creds = readCredentials(expandHome(acc.configDir)); } catch (e) {
+  try { creds = await readCredentials(expandHome(acc.configDir)); } catch (e) {
     return { ...base, status: 'error', message: 'Could not read the login: ' + (e && e.message ? e.message : e) };
   }
   if (!creds || !creds.accessToken) {
@@ -268,6 +211,9 @@ async function fetchStatus(acc) {
   if (credentialsExpired(creds, Date.now())) {
     return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
   }
+  // One timeout covers connecting AND reading the body.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {
     const res = await fetch(USAGE_URL, {
       headers: {
@@ -276,7 +222,7 @@ async function fetchStatus(acc) {
         'Content-Type': 'application/json',
         'User-Agent': 'claude-usage-dashboard/1.0',
       },
-      signal: AbortSignal.timeout(15000),
+      signal: controller.signal,
     });
     if (res.status === 401) {
       return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
@@ -305,8 +251,9 @@ async function fetchStatus(acc) {
     }
     return { ...base, plan, status: 'ok', windows, raw };
   } catch (e) {
-    return { ...base, plan, status: 'error', message: 'Could not reach Anthropic: ' + (e && e.message ? e.message : e) };
-  }
+    const msg = controller.signal.aborted ? 'request timed out after ' + UPSTREAM_TIMEOUT_MS / 1000 + ' s' : (e && e.message ? e.message : e);
+    return { ...base, plan, status: 'error', message: 'Could not reach Anthropic: ' + msg };
+  } finally { clearTimeout(timer); }
 }
 
 /* ------------------------------------------------------------------ */
@@ -407,7 +354,7 @@ function downsample(points, from, to, max = 240) {
   return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([, p]) => p);
 }
 
-function getHistory(id, key, rangeKey) {
+function getHistory(id, key, rangeKey, since = null) {
   const span = RANGES[rangeKey] || RANGES['24h'];
   const to = Date.now();
   const from = to - span;
@@ -420,6 +367,7 @@ function getHistory(id, key, rangeKey) {
   } else {
     points = historyPoints(history, id, key).filter((p) => p[0] >= from);
   }
+  if (since != null) points = points.filter((p) => p[0] > since);
   return downsample(points, from, to);
 }
 
@@ -488,12 +436,20 @@ function hostOk(req) {
   return ALLOW_ANY_HOST || hostAllowed(req.headers.host, ALLOWED_HOSTS);
 }
 
-/* Mutating routes: same-origin browser metadata, plus DASHBOARD_TOKEN when configured.
-   With ALLOW_ANY_HOST the host check is off, so a token is required (set DASHBOARD_TOKEN). */
-function originOk(req) {
-  if (ALLOW_ANY_HOST && !DASHBOARD_TOKEN) return false;
-  return originAllowed(req.headers) && tokenOk(req.headers, DASHBOARD_TOKEN);
+/* Mutating routes: Sec-Fetch-Site same-origin/none, Origin must match Host, JSON content type when a body is
+   present, plus DASHBOARD_TOKEN when configured (header x-dashboard-token, Authorization: Bearer, or the cookie
+   set by opening /?token=...). With ALLOW_ANY_HOST the host check is off, so a token is required.
+   Returns true when blocked (response already sent). */
+function blocked(req, res) {
+  const denied = guardMutation(req.headers, { token: DASHBOARD_TOKEN, allowAnyHost: ALLOW_ANY_HOST });
+  if (!denied) return false;
+  sendJson(res, denied.status, { error: denied.error });
+  return true;
 }
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const localDayKey = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const localTimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -520,7 +476,7 @@ function serveStatic(req, res, pathname) {
   }, req.method);
 }
 
-const server = http.createServer(async (req, res) => {
+async function handler(req, res) {
   try {
     if (!hostOk(req)) {
       warnOnce('host:' + req.headers.host, 'Rejected Host header "' + req.headers.host + '". Add it to ALLOWED_HOSTS if intended (ports are ignored, case-insensitive).');
@@ -536,15 +492,17 @@ const server = http.createServer(async (req, res) => {
       const force = url.searchParams.get('force') === '1';
       const accounts = loadAccounts();
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
-      // sessions are read fresh on every request (cheap, local), usage is cached
+      // sessions: async, cached 3 s per config folder; usage is cached longer
+      const sessionLists = MOCK ? [] : await Promise.all(accounts.map(safeSessions));
       const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir,
-        sessions: MOCK ? [] : safeSessions(accounts[i]) }));
+        sessions: MOCK ? [] : sessionLists[i] }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/tokens') {
       const days = Math.max(1, Math.min(365, Number(url.searchParams.get('days')) || 30));
-      return sendJson(res, 200, MOCK ? mockTokenReport(days) : getTokenReport(days));
+      const report = MOCK ? mockTokenReport(days) : getTokenReport(days);
+      return sendJson(res, 200, { ...report, today: localDayKey(), timeZone: localTimeZone() });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/history') {
@@ -553,13 +511,17 @@ const server = http.createServer(async (req, res) => {
       const range = url.searchParams.get('range') || '24h';
       if (!Object.hasOwn(LABELS, key)) return sendJson(res, 400, { error: 'Unknown usage key.' });
       if (!Object.hasOwn(RANGES, range)) return sendJson(res, 400, { error: 'Unknown range.' });
-      return sendJson(res, 200, { points: getHistory(id, key, range) });
+      const sinceRaw = url.searchParams.get('since');
+      let since = null;
+      if (sinceRaw !== null) {
+        since = /^\d{1,16}$/.test(sinceRaw) ? Number(sinceRaw) : NaN;
+        if (!Number.isSafeInteger(since)) return sendJson(res, 400, { error: 'since must be an epoch in milliseconds.' });
+      }
+      return sendJson(res, 200, { points: getHistory(id, key, range, since) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/accounts') {
-      if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {
-        return sendJson(res, 403, { error: 'Forbidden' });
-      }
+      if (blocked(req, res)) return;
       const body = await parseJsonBody(req);
       const name = String(body.name || '').trim().slice(0, 40);
       const rawDir = String(body.configDir || '').trim().slice(0, 300);
@@ -579,7 +541,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && /^\/api\/accounts\/[^/]+\/login$/.test(url.pathname)) {
-      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (blocked(req, res)) return;
       if (MOCK || ACCOUNTS_DIR || process.platform !== 'win32') {
         return sendJson(res, 400, { error: 'Sign-in launcher requires a direct Windows installation.' });
       }
@@ -613,9 +575,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/chats/share') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local chat sharing requires a direct installation.' });
-      if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {
-        return sendJson(res, 403, { error: 'Forbidden' });
-      }
+      if (blocked(req, res)) return;
       const body = await parseJsonBody(req);
       const accounts = loadAccounts();
       const source = accounts.find((account) => account.id === body.sourceId);
@@ -631,15 +591,15 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-desktop') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop chat sync requires a direct installation.' });
-      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (blocked(req, res)) return;
       try {
         const profiles = findWindowsDesktopProfiles();
         const result = syncDesktopSessionRecordsMany(profiles);
         const copied = { ...desktopSyncStatus.copied };
         for (const [id, count] of Object.entries(result.copied)) copied[id] = (copied[id] || 0) + count;
         desktopSyncStatus = { ...desktopSyncStatus, lastRun: Date.now(), lastError: null,
-          copied };
-        return sendJson(res, 200, result);
+          copied, deleted: desktopSyncStatus.deleted + (result.deleted || 0) };
+        return sendJson(res, 200, { ...result, deleted: result.deleted || 0 });
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
       }
@@ -651,15 +611,15 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-labels') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop label sync requires a direct installation.' });
-      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (blocked(req, res)) return;
       if (labelSyncBusy) return sendJson(res, 409, { error: 'Desktop label sync is already running.' });
       labelSyncBusy = true;
       try {
         if (await desktopRunning()) return sendJson(res, 409, { error: 'Fully quit every Claude Desktop instance, including tray icons, then retry.' });
         const profiles = findWindowsDesktopProfiles();
         const result = await syncMergedDesktopLabelsMany(profiles);
-        labelSyncStatus = { ...labelSyncStatus, lastRun: Date.now(), lastError: null };
-        return sendJson(res, 200, result);
+        labelSyncStatus = { ...labelSyncStatus, lastRun: Date.now(), lastError: null, skippedScopes: result.skippedScopes || [] };
+        return sendJson(res, 200, { ...result, skippedScopes: result.skippedScopes || [] });
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
       } finally { labelSyncBusy = false; }
@@ -667,11 +627,18 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/code-setup/sync') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Local setup sync requires a direct installation.' });
-      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (blocked(req, res)) return;
+      const body = await parseJsonBody(req); // optional: { sourceId, targetId }; empty body keeps Personal -> Work
+      const custom = body.sourceId !== undefined || body.targetId !== undefined;
+      if (custom && (typeof body.sourceId !== 'string' || typeof body.targetId !== 'string' || body.sourceId === body.targetId)) {
+        return sendJson(res, 400, { error: 'Choose two different accounts.' });
+      }
       const accounts = loadAccounts();
-      const personal = accounts.find((account) => account.id === 'personal');
-      const work = accounts.find((account) => account.id === 'work');
-      if (!personal || !work) return sendJson(res, 400, { error: 'Personal and Work accounts are required.' });
+      const personal = accounts.find((account) => account.id === (custom ? body.sourceId : 'personal'));
+      const work = accounts.find((account) => account.id === (custom ? body.targetId : 'work'));
+      if (!personal || !work) {
+        return sendJson(res, 400, { error: custom ? 'Unknown source or target account.' : 'Personal and Work accounts are required.' });
+      }
       try {
         return sendJson(res, 200, syncCodeSetup(expandHome(personal.configDir), expandHome(work.configDir)));
       } catch (error) {
@@ -680,7 +647,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/accounts/')) {
-      if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (blocked(req, res)) return;
       const id = decodeId(url.pathname.slice('/api/accounts/'.length));
       const before = loadAccounts();
       if (!before.some((a) => a.id === id)) return sendJson(res, 404, { error: 'Account not found.' });
@@ -711,18 +678,13 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) sendJson(res, 500, { error: 'Internal server error.' });
     else res.destroy();
   }
-});
+}
 
-server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Is the dashboard already running? Or set PORT=4778.`);
-  } else {
-    console.error(e);
-  }
-  process.exit(1);
-});
+export function createServer() {
+  return http.createServer(handler);
+}
 
-if (!MOCK) {
+function startTokenScan() {
   // Chat logs to read. Accounts that share a folder (junction) are only read once.
   startTokenScanner({
     file: path.join(DATA_DIR, '.claude-usage-tokens.json'),
@@ -736,22 +698,8 @@ if (!MOCK) {
   });
 }
 
-server.listen(PORT, HOST, () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`Claude usage API listening on ${url}${MOCK ? '  (MOCK DATA)' : ''}`);
-  if (ALLOW_ANY_HOST) console.log('WARNING: any host name is accepted. Only do this on a network you trust.' +
-    (DASHBOARD_TOKEN ? ' Changes need DASHBOARD_TOKEN (open /?token=... once to set the cookie).'
-      : ' Changes (add/delete account, sync, sign-in) are blocked until DASHBOARD_TOKEN is set.'));
-  if (process.env.NO_OPEN !== '1' && fs.existsSync(DIST)) {
-    try {
-      const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
-        : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-      spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
-    } catch { /* opening the browser is optional */ }
-  }
-});
-
-if (DESKTOP_AUTO_SYNC) {
+function startDesktopSync() {
+  const timers = [];
   const syncNewDesktopRecords = () => {
     try {
       const profiles = findWindowsDesktopProfiles();
@@ -768,8 +716,7 @@ if (DESKTOP_AUTO_SYNC) {
       desktopSyncStatus = { ...desktopSyncStatus, lastError: message };
     }
   };
-  setTimeout(syncNewDesktopRecords, 1000).unref();
-  setInterval(syncNewDesktopRecords, DESKTOP_SYNC_MS).unref();
+  timers.push(setTimeout(syncNewDesktopRecords, 1000), setInterval(syncNewDesktopRecords, DESKTOP_SYNC_MS));
 
   let closedChecks = 0;
   const profileClosedChecks = {};
@@ -808,7 +755,7 @@ if (DESKTOP_AUTO_SYNC) {
         if (targets.length) {
           labelSyncBusy = true;
           const result = await syncMergedDesktopLabelsMany(profiles, { targetIds: targets });
-          labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: true };
+          labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: true, skippedScopes: result.skippedScopes || [] };
           if (result.updated) console.log(`Desktop labels: synced ${targets.join(', ')}`);
         } else labelSyncStatus = { ...labelSyncStatus, waiting: true };
         return;
@@ -816,7 +763,7 @@ if (DESKTOP_AUTO_SYNC) {
       if (++closedChecks < 2 || syncedDuringClosure) return;
       labelSyncBusy = true;
       const result = await syncMergedDesktopLabelsMany(profiles);
-      labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
+      labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false, skippedScopes: result.skippedScopes || [] };
       if (!Object.values(await desktopProfileState(profiles)).some(Boolean)) syncedDuringClosure = true;
       if (result.conflicts?.length) console.warn(`Desktop labels: ${result.conflicts.length} assignment conflict(s); first profile wins`);
       if (result.titles || result.groups) console.log(`Desktop labels: ${result.titles} titles, ${result.groups} groups, ${result.assignments} assignments`);
@@ -826,15 +773,68 @@ if (DESKTOP_AUTO_SYNC) {
       labelSyncStatus = { ...labelSyncStatus, lastError: message, waiting: false };
     } finally { labelSyncBusy = false; }
   };
-  setInterval(syncClosedDesktopLabels, 30_000).unref();
+  timers.push(setInterval(syncClosedDesktopLabels, 30_000));
+  for (const t of timers) t.unref();
+  return () => { for (const t of timers) { clearTimeout(t); clearInterval(t); } };
 }
 
-function shutdown() {
-  flushHistory();
-  server.close();
-  setTimeout(() => process.exit(0), 1500).unref();
+/**
+ * Start listening. Options default to the environment; tests pass port 0 and turn side effects off.
+ * Resolves with the listening http.Server (its close() also stops the desktop sync timers).
+ */
+export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync = DESKTOP_AUTO_SYNC,
+  openBrowser = process.env.NO_OPEN !== '1' } = {}) {
+  const server = createServer();
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      const actual = server.address().port;
+      const url = `http://localhost:${actual}`;
+      console.log(`Claude usage API listening on ${url}${MOCK ? '  (MOCK DATA)' : ''}`);
+      if (ALLOW_ANY_HOST) console.log('WARNING: any host name is accepted. Only do this on a network you trust.' +
+        (DASHBOARD_TOKEN ? ' Changes need DASHBOARD_TOKEN (open /?token=... once to set the cookie, or send X-Dashboard-Token / Authorization: Bearer).'
+          : ' Changes (add/delete account, sync, sign-in) are blocked until DASHBOARD_TOKEN is set.'));
+      if (scanner) startTokenScan();
+      if (desktopSync) {
+        const stop = startDesktopSync();
+        server.once('close', stop);
+      }
+      if (openBrowser && fs.existsSync(DIST)) {
+        try {
+          const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+            : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+          spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+        } catch { /* opening the browser is optional */ }
+      }
+      resolve(server);
+    });
+  });
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
-process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+
+function isEntryPoint() {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+
+if (isEntryPoint()) {
+  start().then((server) => {
+    const shutdown = () => {
+      flushHistory();
+      server.close();
+      setTimeout(() => process.exit(0), 1500).unref();
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+    process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
+    process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+  }, (e) => {
+    if (e && e.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Is the dashboard already running? Or set PORT=4778.`);
+    } else {
+      console.error(e);
+    }
+    process.exit(1);
+  });
+}
