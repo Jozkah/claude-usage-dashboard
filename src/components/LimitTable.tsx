@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, CircleX, Flame, ListChecks, RotateCcw, TriangleAlert } from 'lucide-react';
 import type { Account, Level } from '../lib/types';
 import { colorVar, levelFor, paceFor } from '../lib/format';
@@ -31,7 +31,11 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'used', dir: -1 });
 
   const nowBucket = Math.floor(now / 30000);
+  // latest `now` is read inside the memo, which only re-runs per 30 s bucket
+  const nowRef = useRef(now);
+  nowRef.current = now;
   const rows = useMemo<Row[]>(() => {
+    const now = Math.max(nowRef.current, nowBucket * 30000); // ref value is never below its bucket start
     const out: Row[] = [];
     for (const a of accounts) {
       if (a.status !== 'ok') continue;

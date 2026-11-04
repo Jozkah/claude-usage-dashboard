@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Point, RangeKey } from '../lib/types';
 import { colorVar, levelFor } from '../lib/format';
 
@@ -70,8 +70,8 @@ export const UsageChart = memo(function UsageChart({ points, range, mode, series
     return out;
   }, [points, range, span, from]);
 
-  const y = (v: number) => PAD.t + plotH * (1 - v / 100);
-  const xT = (t: number) => PAD.l + ((t - from) / span) * plotW;
+  const y = useCallback((v: number) => PAD.t + plotH * (1 - v / 100), [plotH]);
+  const xT = useCallback((t: number) => PAD.l + ((t - from) / span) * plotW, [from, span, plotW]);
 
   const empty = ready && !error && points.length === 0;
   const failed = ready && error && points.length === 0;
@@ -126,8 +126,7 @@ export const UsageChart = memo(function UsageChart({ points, range, mode, series
     const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)} ${py.toFixed(1)}`).join(' ');
     const fill = `${line} L${pts[pts.length - 1][0].toFixed(1)} ${PAD.t + plotH} L${pts[0][0].toFixed(1)} ${PAD.t + plotH} Z`;
     return { line, fill };
-    // deliberately keyed on the data, not on the Date.now()/closure helpers
-  }, [points, width, from, span]);
+  }, [points, xT, y, plotH]);
 
   const ticks = useMemo(() => Array.from({ length: 6 }, (_, i) => from + (span * (i + 0.5)) / 6), [from, span]);
   const lastV = points.length ? points[points.length - 1][1] : 0;

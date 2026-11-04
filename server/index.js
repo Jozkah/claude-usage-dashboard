@@ -410,6 +410,7 @@ async function loadStatus(acc, index, force) {
   if (bo && Date.now() < bo.until && previous) return previous;
 
   lastLivePoll.set(acc.id, Date.now());
+  /** @type {any} */
   let value;
   try { value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc); } catch (e) {
     value = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now(), status: 'error',
@@ -789,7 +790,7 @@ export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync =
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
-      const actual = server.address().port;
+      const actual = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
       const url = `http://localhost:${actual}`;
       console.log(`Claude usage API listening on ${url}${MOCK ? '  (MOCK DATA)' : ''}`);
       if (ALLOW_ANY_HOST) console.log('WARNING: any host name is accepted. Only do this on a network you trust.' +
@@ -802,8 +803,8 @@ export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync =
       }
       if (openBrowser && fs.existsSync(DIST)) {
         try {
-          const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
-            : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+          const cmd = /** @type {[string, string[]]} */ (process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+            : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]]);
           spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
         } catch { /* opening the browser is optional */ }
       }

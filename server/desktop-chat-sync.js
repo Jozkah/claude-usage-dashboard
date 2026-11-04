@@ -49,7 +49,7 @@ export function activeAccountIds(profile) {
 export function activeSessionLeaves(profile) {
   const leaves = listLeaves(profile);
   if (!leaves.length) {
-    const error = new Error(`No local Desktop session folder found in profile ${profile}.`);
+    const error = /** @type {NodeJS.ErrnoException} */ (new Error(`No local Desktop session folder found in profile ${profile}.`));
     error.code = 'NO_SESSION_FOLDER';
     throw error;
   }
@@ -95,6 +95,7 @@ const sideKey = (profile) => path.resolve(profile).toLowerCase();
 // the remaining copy is byte-identical to what that tick recorded, it is older than minAgeMs,
 // the session folders are the same as at that tick, and the missing side is not suspiciously
 // empty or missing most of its chats.
+/** @param {string} personalProfile @param {string} workProfile @param {{ minAgeMs?: number, inspectConflicts?: boolean, stateDir?: string, errors?: any[], propagateDeletions?: boolean }} [options] */
 export function syncDesktopSessionRecords(personalProfile, workProfile, { minAgeMs = 0, inspectConflicts = true, stateDir, errors, propagateDeletions = true } = {}) {
   const sides = [{ profile: personalProfile, name: 'work' }, { profile: workProfile, name: 'personal' }];
   const leafOf = [sessionLeaves(personalProfile), sessionLeaves(workProfile)];
@@ -142,7 +143,7 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
   }
 
   for (const file of maps[0].keys()) if (maps[1].has(file)) known.add(file);
-  for (const [index, direction] of [[0, 'work'], [1, 'personal']]) {
+  for (const [index, direction] of /** @type {[number, string][]} */ ([[0, 'work'], [1, 'personal']])) {
     const source = maps[index];
     const targetMap = maps[1 - index];
     const targetLeaf = leafOf[1 - index];
@@ -260,6 +261,7 @@ const unchanged = (before, after) => before.size === after.size && before.mtimeM
 
 // Call only after both Desktop profiles exit. Live Desktop workers can rewrite
 // these pointers from memory, including stale empty records.
+/** @param {string} personalProfile @param {string} workProfile @param {{ targetProfile?: string, errors?: any[], stateDir?: string }} [options] */
 export function repairEmptyDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both', errors, stateDir } = {}) {
   const personal = profileFiles(personalProfile);
   const work = profileFiles(workProfile);
@@ -309,6 +311,7 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile, {
 
 // Call only while target Desktop profile is closed. A pointer with fewer turns
 // can keep showing an incomplete transcript even when both profiles share JSONL.
+/** @param {string} personalProfile @param {string} workProfile @param {{ targetProfile?: string, errors?: any[], stateDir?: string }} [options] */
 export function repairStaleDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both', errors, stateDir } = {}) {
   const personal = profileFiles(personalProfile);
   const work = profileFiles(workProfile);
@@ -360,6 +363,7 @@ export function repairStaleDesktopSessionRecords(personalProfile, workProfile, {
 // Call only while this profile is closed; Desktop otherwise rewrites records
 // from memory. A stale branch can make an otherwise valid chat fail to open.
 // Covers every active session folder of the profile.
+/** @param {string} profilePath @param {{ errors?: any[], stateDir?: string }} [options] */
 export function alignDesktopSessionBranches(profilePath, { errors, stateDir } = {}) {
   let aligned = 0;
   for (const leaf of activeSessionLeaves(profilePath)) {
@@ -388,6 +392,7 @@ export function alignDesktopSessionBranches(profilePath, { errors, stateDir } = 
 
 // Run only while Work Desktop is closed. Its in-memory session index otherwise
 // overwrites edited pointers. Personal's archive state controls shared visibility.
+/** @param {string} personalProfile @param {string} workProfile @param {{ errors?: any[], stateDir?: string }} [options] */
 export function reconcileWorkSessionRecords(personalProfile, workProfile, { errors, stateDir } = {}) {
   const personal = profileFiles(personalProfile);
   const work = profileFiles(workProfile);

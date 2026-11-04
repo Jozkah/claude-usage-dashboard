@@ -92,6 +92,7 @@ async function buildSidebarOps(db, scope, groups, sections) {
 // Validates first, backs up only when a write is about to happen, and removes that
 // backup again if the write fails. `beforeCommit` runs after validation and may return a
 // rollback function that is called when the LevelDB batch fails.
+/** @param {string} profile @param {string} scope @param {any} groups @param {any} sections @param {{ beforeCommit?: Function, stateDir?: string }} [options] */
 async function writeSidebarStore(profile, scope, groups, sections, { beforeCommit, stateDir } = {}) {
   const ClassicLevel = await loadClassicLevel();
   const root = path.join(profile, 'Local Storage', 'leveldb');
@@ -256,6 +257,7 @@ function syncDesktopTitles(profiles, targets = profiles, stateDir) {
   return titles;
 }
 
+/** @param {string} personalProfile @param {string} workProfile @param {{ targetProfile?: string, stateDir?: string }} [options] */
 export async function syncMergedDesktopLabels(personalProfile, workProfile, { targetProfile = 'both', stateDir } = {}) {
   if (!['personal', 'work', 'both'].includes(targetProfile)) throw new Error(`Invalid target profile: ${targetProfile}`);
   return syncMergedDesktopLabelsMany({ personal: personalProfile, work: workProfile }, {
@@ -263,6 +265,7 @@ export async function syncMergedDesktopLabels(personalProfile, workProfile, { ta
   });
 }
 
+/** @param {Record<string, string>} profiles @param {{ targetIds?: string[], stateDir?: string }} [options] */
 export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object.keys(profiles), stateDir } = {}) {
   const ids = Object.keys(profiles);
   if (ids.length < 2 || targetIds.some((id) => !Object.hasOwn(profiles, id))) {

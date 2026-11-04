@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { CalendarClock, Hourglass, RotateCcw } from 'lucide-react';
 import type { Account } from '../lib/types';
 import { colorVar, fmtClock, levelFor } from '../lib/format';
@@ -8,7 +8,11 @@ import { FrameCard } from './FrameCard';
 
 export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: number }) {
   const nowBucket = Math.floor(now / 30000);
+  // latest `now` is read inside the memo, which only re-runs per 30 s bucket
+  const nowRef = useRef(now);
+  nowRef.current = now;
   const items = useMemo(() => {
+    const now = Math.max(nowRef.current, nowBucket * 30000); // ref value is never below its bucket start
     const out: { id: string; account: string; label: string; at: number | null; used: number; five: boolean; estimated: boolean }[] = [];
     for (const a of accounts) {
       for (const w of a.windows ?? []) {

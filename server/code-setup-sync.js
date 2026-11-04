@@ -56,6 +56,7 @@ function remap(location, source, target) {
   return location;
 }
 
+/** @param {string} source @param {string} target @param {{ stateDir?: string }} [options] */
 export function syncCodeSetup(source, target, { stateDir } = {}) {
   const sourcePlugins = path.join(source, 'plugins');
   const targetPlugins = path.join(target, 'plugins');
@@ -118,7 +119,7 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
   };
   try {
-    for (const [name, depth] of [['cache', 3], ['marketplaces', 1]]) {
+    for (const [name, depth] of /** @type {[string, number][]} */ ([['cache', 3], ['marketplaces', 1]])) {
       const from = path.join(sourcePlugins, name);
       if (!fs.existsSync(from)) continue;
       for (const [s, d] of missingUnits(from, path.join(targetPlugins, name), depth)) copyUnit(s, d);

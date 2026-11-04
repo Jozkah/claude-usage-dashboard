@@ -35,6 +35,7 @@ function pruneMatching(dir, prefix, kind, keep) {
 }
 
 // Existing backups of `file` (oldest first), from the dedicated backups folder.
+/** @param {string} file @param {string} [kind] @param {{ stateDir?: string }} [options] */
 export function listBackups(file, kind = '', { stateDir } = {}) {
   const dir = backupsDir(stateDir);
   try { return matching(dir, `${backupBase(file)}.backup-${kind ? `${kind}-` : ''}`, kind).map((name) => path.join(dir, name)); }
@@ -43,6 +44,7 @@ export function listBackups(file, kind = '', { stateDir } = {}) {
 
 // Creates a uniquely named backup of `file` in the dedicated backups folder and keeps only
 // the newest `keep` backups of the same kind. Works for files and directories.
+/** @param {string} file @param {string} [kind] @param {{ keep?: number, stateDir?: string }} [options] */
 export function createBackup(file, kind = '', { keep = DEFAULT_KEEP, stateDir } = {}) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const label = kind ? `${kind}-` : '';
@@ -71,6 +73,7 @@ export function pruneBackups(file, kind = '', keep = DEFAULT_KEEP, stateDir) {
 }
 
 // Moves a file into <state dir>/trash/<label>/ instead of deleting it; keeps the newest `keep`.
+/** @param {string} file @param {string} label @param {{ stateDir?: string, keep?: number }} [options] */
 export function moveToTrash(file, label, { stateDir, keep = 200 } = {}) {
   const dir = path.join(stateDir || defaultStateDir(), 'trash', label);
   fs.mkdirSync(dir, { recursive: true });
