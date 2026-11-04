@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { priceFor, costOf } from './pricing.js';
+import { priceFor, costOf, LONG_PROMPT, FLAT_LONG_CONTEXT, PRICED_MODEL_KEYS } from './pricing.js';
 
 test('matches published base and cache read prices per million tokens', () => {
   const cases = [
@@ -83,4 +83,16 @@ test('applies fast mode, US inference, cache writes, and web search pricing', ()
 test('applies batch discount to token charges when recorded', () => {
   const price = priceFor('claude-sonnet-5');
   assert.equal(costOf(price, { in: 1e6, out: 1e6, cr: 0, c5: 0, c1: 0, tier: 'batch' }), 6);
+});
+
+test('every priced model has a reviewed long-context decision (fails when a model is added without one)', () => {
+  for (const k of PRICED_MODEL_KEYS) {
+    assert.ok(Boolean(LONG_PROMPT[k]) !== FLAT_LONG_CONTEXT.includes(k), `long-context decision for ${k}: exactly one of LONG_PROMPT / FLAT_LONG_CONTEXT`);
+  }
+  for (const k of [...Object.keys(LONG_PROMPT), ...FLAT_LONG_CONTEXT]) assert.ok(PRICED_MODEL_KEYS.includes(k), `stale entry ${k}`);
+  assert.equal(LONG_PROMPT['haiku-5-5'].verified, true);
+});
+
+test('Claude 4.6+ models are flat across a 1M window', () => {
+  assert.equal(costOf(priceFor('claude-opus-4-6'), { in: 900000, out: 0, cr: 0, c5: 0, c1: 0 }), 4.5);
 });

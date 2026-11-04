@@ -12,7 +12,8 @@ export function nextReset(window, now, stale = false) {
 
 export function nextUsagePollAt(value, now, graceMs = RESET_GRACE_MS) {
   if (!value || value.status !== 'ok' || !Array.isArray(value.windows)) return now;
-  const limiting = value.windows.filter((window) => window.used >= 100);
+  // Only reset-bound windows hold polling; extra_usage and others have no reset to wait for.
+  const limiting = value.windows.filter((window) => window.used >= 100 && /^(five_hour|seven_day)/.test(String(window.key)));
   if (!limiting.length) return now;
   const resets = limiting.map((window) => nextReset(window, now, value.stale));
   if (resets.some((reset) => !reset)) return now;

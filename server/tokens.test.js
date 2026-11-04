@@ -183,3 +183,62 @@ test('mock report returns the requested number of consecutive days', () => {
   assert.equal(rep.days.length, 5);
   assert.equal(new Set(rep.days.map((d) => d.date)).size, 5);
 });
+
+test('same-size rewrite with identical head is detected by the tail fingerprint', async () => {
+  const t = tmp();
+  try {
+    const file = path.join(t.dir, 'a.jsonl');
+    const s = createTokenStore();
+    fs.writeFileSync(file, [line('a'), line('b'), line('c')].join('\n') + '\n');
+    await s.scanOnce(() => [t.dir]);
+    assert.equal(s.getReport(7, NOW).days[0].input, 30);
+    const size = fs.statSync(file).size;
+    // same byte length, same first line, last line differs only in cache_read (inside the tail window)
+    fs.writeFileSync(file, [line('a'), line('b'), line('d', { cr: 5 })].join('\n') + '\n');
+    assert.equal(fs.statSync(file).size, size);
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(file, later, later);
+    await s.scanOnce(() => [t.dir]);
+    assert.equal(s.getReport(7, NOW).days[0].input, 40); // a,b,c once each, d added, nothing doubled
+  } finally { t.done(); }
+});
+
+test('unchanged size and mtime are not re-read; directory listing is cached by dir mtime', async () => {
+  const t = tmp();
+  try {
+    const file = path.join(t.dir, 'a.jsonl');
+    const s = createTokenStore();
+    fs.writeFileSync(file, line('a') + '\n');
+    await s.scanOnce(() => [t.dir]);
+    const f = s.state.files[file];
+    f.head = 'AAAA'; // would force a reset if the signature were checked
+    await s.scanOnce(() => [t.dir]);
+    assert.equal(f.offset > 0, true);
+    assert.equal(s.getReport(7, NOW).days[0].input, 10);
+    // a new file in the same directory changes the dir mtime and is picked up
+    const later = new Date(Date.now() + 5000);
+    fs.writeFileSync(path.join(t.dir, 'b.jsonl'), line('b') + '\n');
+    fs.utimesSync(t.dir, later, later);
+    await s.scanOnce(() => [t.dir]);
+    assert.equal(s.getReport(7, NOW).days[0].input, 20);
+  } finally { t.done(); }
+});
+
+test('large state is written in chunks and reloads identically', async () => {
+  const t = tmp();
+  try {
+    const stateFile = path.join(t.dir, 'state.json');
+    const s = createTokenStore();
+    s.load(stateFile);
+    for (let i = 0; i < 40000; i++) s.state.files[`/logs/${i}-${'x'.repeat(40)}.jsonl`] = { offset: i, pending: null, head: 'abc', tail: 'def' };
+    s.state.days['2026-10-12'] = { u: { '["claude-sonnet-4-5","app","","","",0]': [10, 5, 0, 0, 0, 0] } };
+    await s.scanOnce(() => [t.dir]); // empty root: files kept (nothing walked), state saved
+    const text = fs.readFileSync(stateFile, 'utf8');
+    assert.ok(text.length > 2 * (1 << 20));
+    const j = JSON.parse(text);
+    assert.equal(Object.keys(j.files).length, 40000);
+    const r = createTokenStore();
+    r.load(stateFile);
+    assert.equal(r.getReport(7, NOW).days[0].input, 10);
+  } finally { t.done(); }
+});

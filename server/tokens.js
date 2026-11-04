@@ -18,7 +18,8 @@ import { priceFor, costOf, promptClass, promptOfClass } from './pricing.js';
 
 const STATE_VERSION = 4;
 const SEEN_LIMIT = 100000; // committed message keys kept for de-duplication across files
-const HEAD_BYTES = 64; // first bytes of a file remembered to detect a rewrite
+const HEAD_BYTES = 64; // first and last-read bytes of a file remembered to detect a rewrite
+const CHUNK_CHARS = 1 << 20; // state is serialized and written in pieces of about this size
 const currentTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -76,14 +77,42 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     } catch { /* first run */ }
   }
 
-  /** Async write so a big state does not block on disk; JSON.stringify itself is still synchronous. */
+  /** Serialize the state in ~1 MB pieces (a consistent snapshot, no single giant JSON string), then write them async. */
+  function stateChunks() {
+    const chunks = [];
+    let cur = [];
+    let len = 0;
+    const put = (str) => { cur.push(str); len += str.length; if (len >= CHUNK_CHARS) { chunks.push(cur.join('')); cur = []; len = 0; } };
+    put(`{"v":${state.v},"tz":${JSON.stringify(state.tz)},"updatedAt":${Number(progress.updatedAt) || 0}`);
+    for (const key of ['files', 'days']) {
+      put(`,"${key}":{`);
+      let first = true;
+      for (const [k, v] of Object.entries(state[key])) {
+        put(`${first ? '' : ','}${JSON.stringify(k)}:${JSON.stringify(v)}`);
+        first = false;
+      }
+      put('}');
+    }
+    put(',"seen":[');
+    let first = true;
+    for (const k of seen) { put(`${first ? '' : ','}${JSON.stringify(k)}`); first = false; }
+    put(']}');
+    if (cur.length) chunks.push(cur.join(''));
+    return chunks;
+  }
+
+  async function writeChunks(tmp, chunks) {
+    const fh = await fs.promises.open(tmp, 'w');
+    try { for (const c of chunks) await fh.write(c); } finally { await fh.close(); }
+  }
+
   function save() {
     if (!stateFile || !dirty || saving) return saving;
     dirty = false;
-    let body;
-    try { body = JSON.stringify({ ...state, seen: [...seen], updatedAt: progress.updatedAt }); } catch { dirty = true; return null; }
+    let chunks;
+    try { chunks = stateChunks(); } catch { dirty = true; return null; }
     const tmp = stateFile + '.tmp';
-    saving = fs.promises.writeFile(tmp, body)
+    saving = writeChunks(tmp, chunks)
       .then(() => fs.promises.rename(tmp, stateFile))
       .catch(() => { dirty = true; }) // best effort
       .finally(() => { saving = null; });
@@ -148,29 +177,59 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
 
   /* -------------------------------- scanning -------------------------------- */
 
-  function walk(dir, out) {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p, out);
-      else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
+  /* Directory listings are cached by directory mtime (it changes when entries are added or removed;
+     appending to a file does not touch it). The cache is rebuilt every round from the directories
+     just visited, so it stays bounded to directories that still exist. */
+  let dirCache = new Map();
+
+  function walk(dir, out, visited) {
+    let mtime;
+    try { mtime = fs.statSync(dir).mtimeMs; } catch { return; }
+    let ent = dirCache.get(dir);
+    if (!ent || ent.mtime !== mtime) {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      ent = { mtime, files: [], dirs: [] };
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) ent.dirs.push(p);
+        else if (e.isFile() && e.name.endsWith('.jsonl')) ent.files.push(p);
+      }
     }
+    visited.set(dir, ent);
+    for (const p of ent.files) out.push(p);
+    for (const d of ent.dirs) walk(d, out, visited);
   }
 
   /** File was replaced or shrunk: keep what was pending, then re-read from the start (ids de-duplicate). */
   function resetFile(f) {
     if (f.pending) commit(f.pending);
-    f.pending = null; f.offset = 0; f.head = '';
+    f.pending = null; f.offset = 0; f.head = ''; f.tail = '';
     dirty = true;
   }
 
-  async function refreshHead(fh, f) {
+  /** Remember the first bytes of the file and the bytes just before `offset`. */
+  async function refreshSig(fh, f) {
     const want = Math.min(HEAD_BYTES, f.offset);
-    if (want <= 0 || (f.head && Buffer.from(f.head, 'base64').length >= want)) return;
-    const b = Buffer.alloc(want);
-    const { bytesRead } = await fh.read(b, 0, want, 0);
-    f.head = b.subarray(0, bytesRead).toString('base64');
+    if (want <= 0) { f.head = ''; f.tail = ''; return; }
+    const h = Buffer.alloc(want);
+    const t = Buffer.alloc(want);
+    const a = await fh.read(h, 0, want, 0);
+    const b = await fh.read(t, 0, want, f.offset - want);
+    f.head = h.subarray(0, a.bytesRead).toString('base64');
+    f.tail = t.subarray(0, b.bytesRead).toString('base64');
+  }
+
+  /** True when the bytes already read still match the remembered head and tail. */
+  async function sigMatches(fh, f) {
+    for (const [saved, at] of [[f.head, () => 0], [f.tail, (n) => f.offset - n]]) {
+      if (!saved) continue; // legacy state without this part: re-baselined after the read
+      const want = Buffer.from(saved, 'base64');
+      const got = Buffer.alloc(want.length);
+      const { bytesRead } = await fh.read(got, 0, want.length, at(want.length));
+      if (bytesRead !== want.length || !got.equals(want)) return false;
+    }
+    return true;
   }
 
   async function readNew(p, f, st) {
@@ -178,12 +237,7 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     try {
       const size = st.size;
       if (size < f.offset) resetFile(f);
-      else if (f.offset > 0 && f.head) {
-        const want = Buffer.from(f.head, 'base64');
-        const got = Buffer.alloc(want.length);
-        const { bytesRead } = await fh.read(got, 0, want.length, 0);
-        if (bytesRead !== want.length || !got.equals(want)) resetFile(f);
-      }
+      else if (f.offset > 0 && !(await sigMatches(fh, f))) resetFile(f);
       buf ||= Buffer.allocUnsafe(chunkSize); // one reusable buffer
       let pos = f.offset;
       let carry = Buffer.alloc(0);
@@ -199,7 +253,7 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
         for (const line of text.split('\n')) ingest(line, f);
         f.offset = pos - carry.length; // only ever advance to a line boundary
       }
-      await refreshHead(fh, f);
+      await refreshSig(fh, f);
       f.mtime = st.mtimeMs;
       dirty = true;
     } finally {
@@ -212,7 +266,9 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     running = true;
     try {
       const files = [];
-      for (const root of getRoots()) walk(root, files);
+      const visited = new Map();
+      for (const root of getRoots()) walk(root, files, visited);
+      dirCache = visited;
       if (files.length) { // forget logs that were deleted; their day totals stay
         const present = new Set(files);
         for (const p of Object.keys(state.files)) {
@@ -227,6 +283,7 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
         let st;
         try { st = fs.statSync(p); } catch { continue; }
         const f = (state.files[p] ||= { offset: 0, pending: null });
+        // unchanged size and mtime: nothing to read or verify
         if (st.size !== f.offset || (f.mtime !== undefined && st.mtimeMs !== f.mtime)) work.push([p, f, st]);
       }
       progress.scanning = work.length > 0;

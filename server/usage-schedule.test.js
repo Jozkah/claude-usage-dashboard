@@ -42,3 +42,11 @@ test('nextUsagePollAt picks latest of several limiting windows and polls now whe
   assert.equal(nextUsagePollAt({ status: 'ok', windows: [a, { ...b, resetsAt: null }] }, now), now);
   assert.equal(nextUsagePollAt({ status: 'ok', windows: [{ ...a, resetsAt: '2026-11-01T00:00:00Z' }] }, now), now);
 });
+
+test('ignores non five_hour/seven_day windows when deciding poll hold', () => {
+  const now = Date.parse('2026-11-02T12:00:00Z');
+  const cap = { key: 'seven_day', used: 100, resetsAt: '2026-11-04T07:00:00Z' };
+  const extra = { key: 'extra_usage', used: 100, resetsAt: null };
+  assert.equal(nextUsagePollAt({ status: 'ok', windows: [cap, extra] }, now), Date.parse('2026-11-04T07:00:00Z') + RESET_GRACE_MS);
+  assert.equal(nextUsagePollAt({ status: 'ok', windows: [extra] }, now), now);
+});

@@ -33,12 +33,24 @@ const PRICES = {
 export const PRICING_VERSION = 4;
 
 /* Above `threshold` prompt tokens (input + cache) a request is billed at the `i`/`o` rates.
-   The log does not record the [1m] flag, so the size alone decides. */
-const LONG_PROMPT = {
-  'haiku-5-5': { threshold: 100000, i: 0.5, o: 2.5 },
-  'sonnet-4-5': { threshold: 200000, i: 6, o: 22.5 },
-  'sonnet-4': { threshold: 200000, i: 6, o: 22.5 },
+   The log does not record the [1m] flag, so the size alone decides.
+   verified: live pricing page (2026-11) tiers only Haiku 5.5 (over 100k); Claude 4.6+ bill the 1M window flat.
+   verified:false rows are historical (Sonnet 4 / 4.5 charged 2x input, 1.5x output over 200k in the 1M beta)
+   and are not on the current page; kept so old logs are not under-estimated. */
+export const LONG_PROMPT = {
+  'haiku-5-5': { threshold: 100000, i: 0.5, o: 2.5, verified: true },
+  'sonnet-4-5': { threshold: 200000, i: 6, o: 22.5, verified: false },
+  'sonnet-4': { threshold: 200000, i: 6, o: 22.5, verified: false },
 };
+/* Every PRICES key is either in LONG_PROMPT or listed here as flat-priced across the whole window.
+   A test requires one of the two, so adding a model forces a long-context decision. */
+export const FLAT_LONG_CONTEXT = [
+  'fable-5-1', 'fable-5', 'mythos-5-1', 'mythos-5', 'opus-5-5', 'opus-5', 'opus-4-8', 'opus-4-7', 'opus-4-6',
+  'sonnet-5-5', 'sonnet-5', 'sonnet-4-6', 'haiku-4-5',
+  // no 1M window existed for these
+  'opus-4-5', 'opus-4-1', 'opus-4', 'haiku-3-5', 'haiku-3', 'sonnet-3-7', 'sonnet-3-5', 'sonnet-3', 'opus-3',
+];
+export const PRICED_MODEL_KEYS = Object.keys(PRICES);
 
 /* Prompt size classes let aggregated usage keep the long-context decision per request. */
 export const promptClass = (n) => (n > 200000 ? 2 : n > 100000 ? 1 : 0);
