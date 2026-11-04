@@ -3,7 +3,7 @@ import { EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff } from 'luci
 import type { MouseEvent } from 'react';
 import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, elapsedFraction, fmtClock, levelFor, mainWindows, paceFor } from '../lib/format';
+import { colorVar, elapsedFraction, fmtClock, isIdle, levelFor, mainWindows, paceFor } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { Chip } from './Chip';
 import { Countdown } from './Countdown';
@@ -173,7 +173,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   return (
     <FrameCard
       title={a.name}
-      icon={<span className="flex items-center gap-1.5"><span className="live-dot" /><ProviderIcon provider={providerOf(a)} /></span>}
+      icon={<span className="flex items-center gap-1.5">{isIdle(a) ? <span className="idle-dot" title="Idle: nothing used in the current windows" /> : <span className="live-dot" />}<ProviderIcon provider={providerOf(a)} /></span>}
       right={right}
       delay={delay}
       beam={critical}

@@ -33,3 +33,10 @@ variable font (@fontsource-variable/inter, SIL OFL 1.1). Their licenses
 (MIT, ISC, OFL) require their notices to travel with any redistributed build;
 generate a full report with `npx license-checker --production` before
 redistributing `dist/`.
+
+## Service icons
+
+`public/icons/claude.svg` and `public/icons/codex.svg` come from
+[LobeHub Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg` 1.102.0, MIT License,
+Copyright (c) LobeHub). Claude is a trademark of Anthropic and Codex / OpenAI are trademarks of OpenAI. The marks are
+used only to identify which service an account belongs to; this project is not affiliated with either company.

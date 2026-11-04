@@ -1,7 +1,7 @@
 import { ProviderIcon, providerOf } from './ProviderIcon';
 import { LayoutGrid, Plus, Search, X } from 'lucide-react';
 import type { Account } from '../lib/types';
-import { colorVar, headroom, levelFor } from '../lib/format';
+import { colorVar, headroom, isIdle, levelFor } from '../lib/format';
 import { Ago } from './Countdown';
 import { Chip } from './Chip';
 
@@ -85,7 +85,8 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
                 <button key={a.id} aria-current={selected === a.id ? 'page' : undefined} className={`${item(selected === a.id)} animate-fade`} style={{ animationDelay: `${i * 50}ms` }} onClick={() => onSelect(a.id)}>
                   <span
                     className="size-2 shrink-0 rounded-full"
-                    style={{ background: ok ? colorVar(levelFor(100 - (left ?? 0))) : 'var(--warn)' }}
+                    style={{ background: ok ? (isIdle(a) ? 'var(--subtle-fg)' : colorVar(levelFor(100 - (left ?? 0)))) : 'var(--warn)', opacity: ok && isIdle(a) ? 0.7 : 1 }}
+                    title={ok && isIdle(a) ? 'Idle: nothing used in the current windows' : undefined}
                   />
                   <ProviderIcon provider={providerOf(a)} className="size-3.5" title={false} />
                   <span className="truncate">{a.name}</span>

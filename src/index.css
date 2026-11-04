@@ -140,6 +140,7 @@ body {
 .aurora-blob { position: absolute; border-radius: 9999px; filter: blur(70px); }
 
 .live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--good); }
+.idle-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--subtle-fg); opacity: .7; }
 .live-dot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--good); animation: ping-dot 2s ease-out infinite; }
 
 /* Border beam: paused while its card is off screen (IntersectionObserver in FrameCard) */

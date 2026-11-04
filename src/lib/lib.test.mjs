@@ -1,7 +1,7 @@
 // Run with: node --test src/lib/   (Node 22.6+ strips the TypeScript types natively; no extra dependency)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { elapsedFraction, fmtAgo, fmtDur, headroom, levelFor, mainWindows, modelName, paceFor, windowLength } from './format.ts';
+import { elapsedFraction, fmtAgo, fmtDur, headroom, isIdle, levelFor, mainWindows, modelName, paceFor, windowLength } from './format.ts';
 import { menuIndex, movedTooFar, tabTarget } from './keyboard.ts';
 import { mergeHistory } from './api.ts';
 import { accountReset, nextReset } from './reset.ts';
@@ -124,4 +124,13 @@ test('elapsedFraction and mainWindows', () => {
   const extra = { key: 'seven_day_opus', used: 5 };
   assert.deepEqual(mainWindows({ windows: [extra, { key: 'a' }, { key: 'b' }] }).map((x) => x.key), ['seven_day_opus', 'a']);
   assert.deepEqual(mainWindows({ windows: [extra, w] }), [w]);
+});
+
+test('isIdle only for readable accounts with zero usage and no chat running', () => {
+  const idle = { status: 'ok', windows: [{ key: 'five_hour', used: 0 }, { key: 'seven_day', used: 0 }], sessions: [] };
+  assert.equal(isIdle(idle), true);
+  assert.equal(isIdle({ ...idle, windows: [{ key: 'five_hour', used: 0 }, { key: 'seven_day', used: 3 }] }), false);
+  assert.equal(isIdle({ ...idle, sessions: [{ working: true }] }), false);
+  assert.equal(isIdle({ ...idle, status: 'expired' }), false);
+  assert.equal(isIdle({ status: 'ok', windows: [] }), false);
 });

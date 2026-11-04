@@ -65,6 +65,12 @@ export function fmtAgo(ms: number): string {
 }
 
 /** Percentage points left on the tightest of the two main windows. */
+/** True for an account that reads fine but has used nothing in any window and has no chat running. */
+export function isIdle(a: Account): boolean {
+  const ws = a.windows ?? [];
+  return a.status === 'ok' && ws.length > 0 && ws.every((w) => w.used === 0) && !(a.sessions ?? []).some((s) => s.working);
+}
+
 export function headroom(a: Account): number {
   const ws = a.windows ?? [];
   const main = ws.filter((w) => w.key === 'five_hour' || w.key === 'seven_day');
