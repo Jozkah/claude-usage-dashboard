@@ -1,3 +1,4 @@
+import { ProviderIcon, providerOf } from './ProviderIcon';
 import { LayoutGrid, Plus, Search, X } from 'lucide-react';
 import type { Account } from '../lib/types';
 import { colorVar, headroom, levelFor } from '../lib/format';
@@ -86,6 +87,7 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
                     className="size-2 shrink-0 rounded-full"
                     style={{ background: ok ? colorVar(levelFor(100 - (left ?? 0))) : 'var(--warn)' }}
                   />
+                  <ProviderIcon provider={providerOf(a)} className="size-3.5" title={false} />
                   <span className="truncate">{a.name}</span>
                   <span className="ml-auto text-xs text-subtle-fg tabular-nums">{left != null ? `${Math.round(left)}% left` : 'check'}</span>
                 </button>

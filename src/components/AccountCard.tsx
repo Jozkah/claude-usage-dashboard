@@ -1,3 +1,4 @@
+import { ProviderIcon, providerOf } from './ProviderIcon';
 import { EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { useState } from 'react';
@@ -149,7 +150,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
     const Icon = a.status === 'no_login' || a.status === 'expired' ? KeyRound : a.status === 'error' ? WifiOff : TriangleAlert;
     const message = a.message || (a.status === 'ok' ? 'The server returned no usage windows for this account yet. It will retry on the next poll.' : 'No details were reported. It will retry on the next poll.');
     return (
-      <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay} onContextMenu={onContextMenu} onLongPress={onLongPress}>
+      <FrameCard title={a.name} icon={<span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-warn" /><ProviderIcon provider={providerOf(a)} /></span>} right={right} delay={delay} onContextMenu={onContextMenu} onLongPress={onLongPress}>
         <div className="flex gap-3 p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/12 text-warn"><Icon className="size-4" /></div>
           <div className="min-w-0">
@@ -172,7 +173,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   return (
     <FrameCard
       title={a.name}
-      icon={<span className="live-dot" />}
+      icon={<span className="flex items-center gap-1.5"><span className="live-dot" /><ProviderIcon provider={providerOf(a)} /></span>}
       right={right}
       delay={delay}
       beam={critical}

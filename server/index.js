@@ -246,7 +246,7 @@ async function safeSessions(acc) {
 async function fetchStatus(acc) {
   if (acc.provider === 'codex') {
     const status = await fetchCodexStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
-      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
+      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }), refresh: NO_REFRESH ? null : undefined });
     return { ...status, configDir: acc.configDir };
   }
   const base = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now() };
@@ -591,6 +591,14 @@ async function handler(req, res) {
       if (!name || !rawDir) return sendJson(res, 400, { error: 'Name and config folder are required.' });
       const accounts = [...loadAccounts()];
       let configDir = rawDir;
+      if (!MOCK && body.provider === 'codex' && body.create === true) {
+        // A second Codex login needs its own CODEX_HOME. Create it, but only directly inside the user's home folder.
+        const target = path.resolve(expandHome(rawDir));
+        if (path.dirname(target) !== path.resolve(os.homedir()) || !/^\.codex[\w-]*$/.test(path.basename(target))) {
+          return sendJson(res, 400, { error: 'A new Codex folder must be named like ~/.codex-work, directly in your home folder.' });
+        }
+        fs.mkdirSync(target, { recursive: true });
+      }
       if (!MOCK) {
         try { configDir = validateConfigDir(rawDir, accounts.map((a) => a.configDir)); } catch (error) {
           return sendJson(res, 400, { error: error.message });

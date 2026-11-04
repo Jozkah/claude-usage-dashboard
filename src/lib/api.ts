@@ -63,9 +63,9 @@ async function postJson<T extends object>(url: string, fallback: string, body?: 
   return result;
 }
 
-export async function addAccount(name: string, configDir: string, provider?: 'codex'): Promise<string | null> {
+export async function addAccount(name: string, configDir: string, provider?: 'codex', create = false): Promise<string | null> {
   try {
-    await postJson('/api/accounts', 'Could not add the account.', { name, configDir, ...(provider ? { provider } : {}) });
+    await postJson('/api/accounts', 'Could not add the account.', { name, configDir, ...(provider ? { provider } : {}), ...(create ? { create: true } : {}) });
     return null;
   } catch (e) {
     return e instanceof Error ? e.message : 'Could not add the account.';

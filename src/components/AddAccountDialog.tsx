@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
 import { addAccount } from '../lib/api';
+import { ProviderIcon } from './ProviderIcon';
 import { Modal } from './Modal';
 
 interface Props {
@@ -15,6 +16,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
   const [name, setName] = useState('');
   const [dir, setDir] = useState('');
   const [codex, setCodex] = useState(false);
+  const [create, setCreate] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -22,7 +24,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
   openRef.current = open;
 
   useEffect(() => {
-    if (open) { setName(''); setDir(''); setCodex(false); setError(''); setBusy(false); }
+    if (open) { setName(''); setDir(''); setCodex(false); setCreate(false); setError(''); setBusy(false); }
   }, [open]);
 
   const submit = async (e: FormEvent) => {
@@ -30,7 +32,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
     setBusy(true);
     setError('');
     let err: string | null;
-    try { err = await addAccount(name, dir, codex ? 'codex' : undefined); }
+    try { err = await addAccount(name, dir, codex ? 'codex' : undefined, codex && create); }
     catch (ex) { err = ex instanceof Error ? ex.message : 'Could not add the account.'; }
     finally { setBusy(false); }
     if (!openRef.current) return; // dialog was closed while the request ran
@@ -52,7 +54,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
               <button type="button" key={label} aria-pressed={codex === value}
                 onClick={() => { setCodex(value); if (!dir || dir === '~/.codex') setDir(value ? '~/.codex' : ''); }}
                 className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${codex === value ? 'border-accent bg-frame font-medium' : 'border-line hover:bg-frame'}`}>
-                {label}
+                <span className="flex items-center gap-2"><ProviderIcon provider={value ? 'codex' : 'claude'} title={false} />{label}</span>
               </button>
             ))}
           </div>
@@ -68,6 +70,13 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
               Log in there once with Claude Code first. Running in Docker? Mount the folder under <code className="rounded bg-frame px-1">/accounts</code> instead.</>
           )}
         </p>
+
+        {codex && (
+          <label className="mt-3 flex items-center gap-2 text-xs text-muted-fg">
+            <input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />
+            Create the folder if it does not exist (for a second Codex login, e.g. <code className="rounded bg-frame px-1">~/.codex-work</code>)
+          </label>
+        )}
 
         <p role="alert" className="mt-3 min-h-5 text-[13px] text-bad">{error}</p>
         <div className="mt-2 flex justify-end gap-2">
