@@ -29,6 +29,7 @@ import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 import { syncAllAccounts } from './account-sync.js';
 import { fetchCodexStatus } from './codex.js';
+import { createCodexSessionReader } from './codex-sessions.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
   parseAllowedHosts, hostAllowed, guardMutation, SECURITY_HEADERS } from './http-utils.js';
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
@@ -238,8 +239,10 @@ function parseWindows(data) {
 /* Open Claude Code chats per account: async, cached 3 s per config folder, files older than 24 h count as dead. */
 const readSessions = createSessionReader({ inContainer: Boolean(ACCOUNTS_DIR) }); // host pids are not visible in Docker
 
+const readCodexSessions = createCodexSessionReader();
+
 async function safeSessions(acc) {
-  if (acc.provider === 'codex') return []; // Codex keeps no Claude Code session files
+  if (acc.provider === 'codex') { try { return await readCodexSessions(expandHome(acc.configDir)); } catch { return []; } }
   try { return await readSessions(expandHome(acc.configDir)); } catch { return []; }
 }
 

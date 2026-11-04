@@ -161,7 +161,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>
         </div>
-        {a.provider !== 'codex' && <div className="px-4 pb-4 -mt-1"><Chats a={a} /></div>}
+        <div className="px-4 pb-4 -mt-1"><Chats a={a} /></div>
       </FrameCard>
     );
   }
@@ -194,7 +194,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
         {rest.length > 0 && (
           <div className="mt-4 grid gap-3.5 px-1 pb-1">{rest.map((w) => <Bar key={w.key} w={w} now={now} account={a} />)}</div>
         )}
-        {a.provider !== 'codex' && <Chats a={a} />}
+        <Chats a={a} />
         <div className="mt-auto flex min-h-[92px] flex-col justify-end">
           {a.stale && <p className="px-1 text-[11px] leading-relaxed text-subtle-fg">Last read {new Date(a.fetchedAt).toLocaleString()} · {a.staleMessage}</p>}
           {loginButton}
