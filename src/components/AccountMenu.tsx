@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Account } from '../lib/types';
+import { menuIndex } from '../lib/keyboard';
 
 export interface MenuAction { label: string; run: () => void }
 
@@ -33,13 +34,10 @@ export function AccountMenu({ account, x, y, actions, emptyHint, onClose }: Prop
   const onKey = (e: React.KeyboardEvent) => {
     const items = Array.from(root.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
     const i = items.indexOf(document.activeElement as HTMLElement);
-    const go = (n: number) => { e.preventDefault(); items[(n + items.length) % items.length]?.focus(); };
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-    else if (e.key === 'ArrowDown') go(i + 1);
-    else if (e.key === 'ArrowUp') go(i < 0 ? items.length - 1 : i - 1);
-    else if (e.key === 'Home') go(0);
-    else if (e.key === 'End') go(items.length - 1);
-    else if (e.key === 'Tab') onClose();
+    if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    if (e.key === 'Tab') { onClose(); return; }
+    const next = menuIndex(e.key, i, items.length);
+    if (next !== null) { e.preventDefault(); items[next]?.focus(); }
   };
 
   return (

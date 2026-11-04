@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { X } from 'lucide-react';
+import { FOCUSABLE, trapTab } from '../lib/keyboard';
 
 interface Props {
   open: boolean;
@@ -9,8 +10,6 @@ interface Props {
   title: string;
   children: ReactNode;
 }
-
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 // Remember the last focused element outside any dialog: autoFocus inside the dialog runs before our effect.
 let lastOutside: HTMLElement | null = null;
@@ -40,14 +39,7 @@ export function Modal({ open, onClose, title, children }: Props) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
-      if (e.key !== 'Tab' || !dialog.current) return;
-      const items = Array.from(dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (!items.length) { e.preventDefault(); return; }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !dialog.current.contains(active))) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && (active === last || !dialog.current.contains(active))) { e.preventDefault(); first.focus(); }
+      trapTab(e, dialog.current);
     };
     window.addEventListener('keydown', onKey);
     return () => {

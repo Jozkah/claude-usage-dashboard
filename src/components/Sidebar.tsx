@@ -1,6 +1,7 @@
 import { LayoutGrid, Plus, Search, X } from 'lucide-react';
 import type { Account } from '../lib/types';
-import { colorVar, fmtAgo, headroom, levelFor } from '../lib/format';
+import { colorVar, headroom, levelFor } from '../lib/format';
+import { Ago } from './Countdown';
 import { Chip } from './Chip';
 
 interface Props {
@@ -11,7 +12,6 @@ interface Props {
   search: string;
   onSearch: (s: string) => void;
   lastLoad: number;
-  now: number;
   mock: boolean;
 }
 
@@ -33,7 +33,7 @@ const item = (active: boolean) =>
       : 'border-transparent text-muted-fg hover:bg-card/70 hover:text-fg'
   }`;
 
-export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch, lastLoad, now, mock }: Props) {
+export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch, lastLoad, mock }: Props) {
   const q = search.trim().toLowerCase();
   const list = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)) : accounts;
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -103,7 +103,7 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
         <span className="live-dot ml-1" />
         <div className="min-w-0 text-xs leading-tight">
           <div className="font-medium">{mock ? 'Demo data' : 'Live'}</div>
-          <div className="text-subtle-fg">{mock ? `${accounts.length} sample accounts` : lastLoad ? `Updated ${fmtAgo(now - lastLoad)}` : 'Connecting…'}</div>
+          <div className="text-subtle-fg">{mock ? `${accounts.length} sample accounts` : lastLoad ? <>Updated <Ago since={lastLoad} /></> : 'Connecting…'}</div>
         </div>
       </div>
     </div>

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, CircleX, Flame, ListChecks, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, CircleX, Flame, ListChecks, RotateCcw, TriangleAlert } from 'lucide-react';
 import type { Account, Level } from '../lib/types';
-import { colorVar, fmtDur, levelFor, paceFor } from '../lib/format';
+import { colorVar, levelFor, paceFor } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { Chip } from './Chip';
+import { Countdown } from './Countdown';
 import { FrameCard } from './FrameCard';
 
 type SortKey = 'account' | 'window' | 'used' | 'reset';
@@ -15,6 +16,7 @@ interface Row {
   used: number;
   resetAt: number | null;
   estimated: boolean;
+  expired: boolean;
   pace: ReturnType<typeof paceFor>;
 }
 
@@ -42,6 +44,7 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
           used: w.used,
           resetAt: reset?.at ?? null,
           estimated: reset?.estimated ?? false,
+          expired: !!w.expired,
           pace: paceFor(w, now),
         });
       }
@@ -102,12 +105,14 @@ export function LimitTable({ accounts, now }: { accounts: Account[]; now: number
                     </div>
                   </td>
                   <td className="px-4 py-3 tabular-nums text-muted-fg">
-                    {r.resetAt ? <>{fmtDur(r.resetAt - now)}{r.estimated && <span className="ml-1 text-[11px] text-subtle-fg">est.</span>}</>
+                    {r.resetAt ? <><Countdown at={r.resetAt} />{r.estimated && <span className="ml-1 text-[11px] text-subtle-fg">est.</span>}</>
                       : 'Awaiting live reset'}
                   </td>
                   <td className="px-4 py-3">{r.pace ? <Chip tone={r.pace.tone}>{r.pace.label}</Chip> : <span className="text-subtle-fg">—</span>}</td>
                   <td className="px-4 py-3">
-                    <Chip tone={lvl}><S.icon className="size-3" />{S.label}</Chip>
+                    {r.expired
+                      ? <Chip tone="mute"><RotateCcw className="size-3" />Reset · awaiting reading</Chip>
+                      : <Chip tone={lvl}><S.icon className="size-3" />{S.label}</Chip>}
                   </td>
                 </tr>
               );

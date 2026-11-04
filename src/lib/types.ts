@@ -3,6 +3,8 @@ export interface UsageWindow {
   label: string;
   used: number;
   resetsAt: string | null;
+  /** Cached reading whose reset time has passed: `used` describes the previous period. */
+  expired?: boolean;
 }
 
 export interface ChatSession {
@@ -22,6 +24,8 @@ export interface Account {
   configDir: string;
   fetchedAt: number;
   plan?: string | null;
+  /** Snapshot seeded without a known plan: limits shown may be incomplete. */
+  planUnknown?: boolean;
   status: AccountStatus;
   authStatus?: AccountStatus;
   retryAt?: number;

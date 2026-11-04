@@ -1,7 +1,9 @@
 // Run with: node --test src/lib/   (Node 22.6+ strips the TypeScript types natively; no extra dependency)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtAgo, fmtDur, headroom, levelFor, paceFor, windowLength } from './format.ts';
+import { elapsedFraction, fmtAgo, fmtDur, headroom, levelFor, mainWindows, modelName, paceFor, windowLength } from './format.ts';
+import { menuIndex, movedTooFar, tabTarget } from './keyboard.ts';
+import { mergeHistory } from './api.ts';
 import { accountReset, nextReset } from './reset.ts';
 
 const HOUR = 3600e3;
@@ -66,4 +68,60 @@ test('accountReset prefers nextPollAt for a stale, exhausted window', () => {
   const account = { stale: true, nextPollAt: now + 1000 };
   const w = { key: 'five_hour', used: 100, resetsAt: new Date(now - HOUR).toISOString() };
   assert.deepEqual(accountReset(account, w, now), { at: now + 1000, estimated: true });
+});
+
+test('tabTarget wraps Tab inside a focus trap', () => {
+  assert.equal(tabTarget(3, 2, false), 0); // Tab on last -> first
+  assert.equal(tabTarget(3, 0, true), 2); // Shift+Tab on first -> last
+  assert.equal(tabTarget(3, 1, false), null); // middle: browser decides
+  assert.equal(tabTarget(3, -1, false), 0); // focus escaped the trap: pull it back
+  assert.equal(tabTarget(3, -1, true), 2);
+  assert.equal(tabTarget(1, 0, false), 0);
+  assert.equal(tabTarget(0, -1, false), -1); // nothing focusable: hold focus
+});
+
+test('menuIndex implements roving focus', () => {
+  assert.equal(menuIndex('ArrowDown', 0, 3), 1);
+  assert.equal(menuIndex('ArrowDown', 2, 3), 0);
+  assert.equal(menuIndex('ArrowUp', 0, 3), 2);
+  assert.equal(menuIndex('ArrowUp', -1, 3), 2);
+  assert.equal(menuIndex('Home', 2, 3), 0);
+  assert.equal(menuIndex('End', 0, 3), 2);
+  assert.equal(menuIndex('a', 0, 3), null);
+  assert.equal(menuIndex('ArrowDown', -1, 0), null);
+});
+
+test('movedTooFar tells a scroll from a long press', () => {
+  assert.equal(movedTooFar(3, 4), false);
+  assert.equal(movedTooFar(0, 11), true);
+});
+
+test('mergeHistory replaces from the first new timestamp and trims old points', () => {
+  const prev = [[1, 10], [2, 20], [3, 30]];
+  assert.deepEqual(mergeHistory(prev, [[3, 31], [4, 40]], 0), [[1, 10], [2, 20], [3, 31], [4, 40]]);
+  assert.deepEqual(mergeHistory(prev, [], 2), [[2, 20], [3, 30]]);
+  // a server that ignores `since` sends the whole range: it simply replaces what we had
+  assert.deepEqual(mergeHistory(prev, [[1, 11], [2, 21], [3, 31], [4, 41]], 0), [[1, 11], [2, 21], [3, 31], [4, 41]]);
+  assert.deepEqual(mergeHistory(prev, [[4, 40]], 3), [[3, 30], [4, 40]]);
+});
+
+test('modelName', () => {
+  assert.equal(modelName('claude-sonnet-4-5-20250929'), 'Claude Sonnet 4.5');
+  assert.equal(modelName('claude-opus-4-1'), 'Claude Opus 4.1');
+  assert.equal(modelName('claude-3-5-sonnet-20241022'), 'Claude Sonnet 3.5');
+  assert.equal(modelName('claude-3-opus-latest'), 'Claude Opus 3');
+  assert.equal(modelName('us.anthropic.claude-sonnet-4-20250514-v1:0'), 'Claude Sonnet 4');
+  assert.equal(modelName('unknown'), 'Unknown model');
+  assert.equal(modelName('gpt-x'), 'gpt-x');
+});
+
+test('elapsedFraction and mainWindows', () => {
+  const now = Date.now();
+  const w = { key: 'five_hour', used: 10, resetsAt: new Date(now + 2.5 * HOUR).toISOString() };
+  assert.ok(Math.abs(elapsedFraction(w, now) - 0.5) < 1e-6);
+  assert.equal(elapsedFraction({ key: 'five_hour', used: 1, resetsAt: new Date(now - HOUR).toISOString() }, now), null);
+  assert.equal(elapsedFraction({ key: 'other', used: 1, resetsAt: w.resetsAt }, now), null);
+  const extra = { key: 'seven_day_opus', used: 5 };
+  assert.deepEqual(mainWindows({ windows: [extra, { key: 'a' }, { key: 'b' }] }).map((x) => x.key), ['seven_day_opus', 'a']);
+  assert.deepEqual(mainWindows({ windows: [extra, w] }), [w]);
 });

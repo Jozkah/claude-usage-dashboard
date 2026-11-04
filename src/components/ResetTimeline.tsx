@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { CalendarClock, Hourglass, RotateCcw } from 'lucide-react';
 import type { Account } from '../lib/types';
-import { colorVar, fmtClock, fmtDur, levelFor } from '../lib/format';
+import { colorVar, fmtClock, levelFor } from '../lib/format';
 import { accountReset } from '../lib/reset';
+import { Countdown } from './Countdown';
 import { FrameCard } from './FrameCard';
 
 export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: number }) {
@@ -41,7 +42,7 @@ export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: num
                 <div className="truncate text-xs text-muted-fg">{it.label}{it.estimated ? ' · estimated' : ''}</div>
               </div>
               <div className="text-right">
-                <div className="text-[13px] font-medium tabular-nums">{it.at ? fmtDur(it.at - now) : 'Unknown'}</div>
+                <div className="text-[13px] font-medium tabular-nums">{it.at ? <Countdown at={it.at} /> : 'Unknown'}</div>
                 <div className="text-[11.5px] text-subtle-fg">{it.at ? fmtClock(it.at) : 'Awaiting live usage'}</div>
               </div>
             </li>
