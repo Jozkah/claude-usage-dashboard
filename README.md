@@ -12,7 +12,7 @@ Screenshot uses five sample accounts and generated usage data. No real account d
 
 ## Run it
 
-You need [Node.js 18+](https://nodejs.org).
+You need [Node.js](https://nodejs.org) 18 or newer (the Docker image and CI use Node 22; see `.nvmrc`).
 
 ```bash
 npm install
@@ -98,14 +98,31 @@ This action needs dashboard running directly on same computer as Claude Code. It
 | `PORT` | `4777` | API / production server port |
 | `HOST` | `127.0.0.1` | Interface to listen on |
 | `MOCK` | off | `1` shows fake sample data |
-| `DATA_DIR` | home folder | Where the account list and history are saved |
+| `DATA_DIR` | home folder | Where the account list, history, latest readings and token-scan cache (`.claude-usage-tokens.json`) are saved |
+| `ACCOUNTS_DIR` | | Treat every sub-folder as one account (name = folder name). Used by Docker; also turns off desktop auto-sync |
+| `API_PORT` | `4777` | Dev only: API port the Vite dev server proxies `/api` to. Set it when you change `PORT` for `npm run dev` |
+| `TZ` | `UTC` | Docker only: time zone of the container (set in `docker-compose.yml`) |
 | `ALLOWED_HOSTS` | | Extra host names allowed, comma separated (to open it from another device) |
 | `ALLOW_ANY_HOST` | off | `1` accepts any host name. Only on a network you trust |
 | `NO_OPEN` | off | `1` stops it opening the browser on start |
 | `DESKTOP_AUTO_SYNC` | on for direct Windows installs | `0` disables automatic copying of new local Desktop session records |
 
+Security: the server checks the `Host` and `Origin` headers so other web pages cannot read your usage. `ALLOW_ANY_HOST=1` switches the Host check off, so only use it on a trusted network. In Docker keep the published port on loopback (`127.0.0.1:4777:4777`, as in `docker-compose.yml`). The image listens on `0.0.0.0` inside the container, so a bare `docker run -p 4777:4777` exposes it to your network.
+
 To open it from your phone on the same Wi-Fi: `HOST=0.0.0.0 ALLOWED_HOSTS=<your-pc-ip> npm start`.
 That lets anyone on your network see your usage percentages (never your logins).
+
+## Testing
+
+```bash
+npm run typecheck   # tsc, covers src/ and vite.config.ts
+npm test            # node:test over server/*.test.js (cross-platform runner in scripts/run-tests.mjs)
+npm run test:coverage
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs typecheck and tests on pushes to `main` and on pull requests.
+`classic-level` (native, Windows desktop label sync only) is an optional dependency; the server and Docker image run without it.
+Windows launchers write logs to `data/` (`dashboard-watchdog.log`, `dashboard-server.log`, `launcher.log`). The watchdog honors `PORT`.
 
 ## How it works, and what to know
 

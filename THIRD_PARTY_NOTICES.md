@@ -25,3 +25,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Bundled packages
+
+The built web app bundles React, react-dom, motion, lucide-react and the Inter
+variable font (@fontsource-variable/inter, SIL OFL 1.1). Their licenses
+(MIT, ISC, OFL) require their notices to travel with any redistributed build;
+generate a full report with `npx license-checker --production` before
+redistributing `dist/`.
