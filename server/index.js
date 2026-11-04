@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
@@ -27,6 +27,10 @@ import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyD
 import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
 import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
+import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
+  parseAllowedHosts, hostAllowed, originAllowed, tokenOk, SECURITY_HEADERS } from './http-utils.js';
+import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
+  sessionFileFresh, credentialsExpired } from './account-utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, '..', 'dist');
@@ -37,10 +41,8 @@ const MOCK = process.env.MOCK === '1';
 const DATA_DIR = process.env.DATA_DIR || os.homedir();
 const ACCOUNTS_DIR = process.env.ACCOUNTS_DIR || '';
 const ALLOW_ANY_HOST = process.env.ALLOW_ANY_HOST === '1';
-const ALLOWED_HOSTS = new Set([
-  'localhost', '127.0.0.1', '::1',
-  ...String(process.env.ALLOWED_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean),
-]);
+const ALLOWED_HOSTS = parseAllowedHosts(process.env.ALLOWED_HOSTS);
+const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || '';
 
 const CONFIG_FILE = path.join(DATA_DIR, '.claude-usage-dashboard.json');
 const HISTORY_FILE = path.join(DATA_DIR, '.claude-usage-history.json');
@@ -57,17 +59,25 @@ function desktopProfileState(profiles = findWindowsDesktopProfiles()) {
   const script = "@(Get-CimInstance Win32_Process -Filter \"Name = 'Claude.exe'\" | " +
     "Where-Object { $_.CommandLine -notmatch '--type=' } | " +
     'Select-Object ExecutablePath,CommandLine) | ConvertTo-Json -Compress';
-  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
-    { encoding: 'utf8', timeout: 10000 }).trim();
-  const processes = output ? JSON.parse(output) : [];
-  return parseDesktopProcessState(profiles, Array.isArray(processes) ? processes : [processes]);
+  return new Promise((resolve, reject) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', timeout: 10000, windowsHide: true }, (error, stdout) => {
+        if (error) return reject(error);
+        try {
+          const output = String(stdout).trim();
+          const processes = output ? JSON.parse(output) : [];
+          resolve(parseDesktopProcessState(profiles, Array.isArray(processes) ? processes : [processes]));
+        } catch (e) { reject(e); }
+      });
+  });
 }
 
-function desktopRunning() {
-  const state = desktopProfileState();
+async function desktopRunning() {
+  const state = await desktopProfileState();
   return Object.values(state).some(Boolean);
 }
 
+const loginStartedAt = new Map(); // accountId -> ms of last sign-in launch
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
@@ -76,15 +86,7 @@ const HISTORY_KEEP_MS = 8 * 864e5;
 /* accounts                                                            */
 /* ------------------------------------------------------------------ */
 
-const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'account';
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-
-function expandHome(p) {
-  if (!p) return p;
-  if (p === '~') return os.homedir();
-  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2));
-  return p;
-}
 
 function defaultAccounts() {
   if (ACCOUNTS_DIR && fs.existsSync(ACCOUNTS_DIR)) {
@@ -92,7 +94,7 @@ function defaultAccounts() {
       .readdirSync(ACCOUNTS_DIR, { withFileTypes: true })
       .filter((d) => d.isDirectory() || d.isSymbolicLink())
       .map((d) => ({ id: slug(d.name), name: cap(d.name), configDir: path.join(ACCOUNTS_DIR, d.name) }));
-    if (list.length) return list;
+    if (list.length) return uniqueIds(list);
   }
   const home = os.homedir();
   const list = [{ id: 'personal', name: 'Personal', configDir: path.join(home, '.claude') }];
@@ -111,16 +113,34 @@ let mockAccounts = [
 
 function loadAccounts() {
   if (MOCK) return mockAccounts;
+  let text;
+  try { text = fs.readFileSync(CONFIG_FILE, 'utf8'); } catch (e) {
+    if (e && e.code !== 'ENOENT') console.warn('Could not read ' + CONFIG_FILE + ': ' + e.message);
+    return defaultAccounts(); // first run
+  }
   try {
-    const j = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    if (Array.isArray(j.accounts)) return j.accounts;
-  } catch { /* first run */ }
+    const j = JSON.parse(text);
+    if (j && Array.isArray(j.accounts)) {
+      const { accounts, dropped } = normalizeAccounts(j.accounts);
+      if (dropped.length) warnOnce('accounts-dropped', 'Ignoring ' + dropped.length + ' invalid or duplicate account entr' + (dropped.length === 1 ? 'y' : 'ies') + ' in ' + CONFIG_FILE);
+      return accounts;
+    }
+  } catch { /* corrupt: keep a copy below */ }
+  try { fs.copyFileSync(CONFIG_FILE, CONFIG_FILE + '.bad'); } catch { /* best effort */ }
+  warnOnce('accounts-corrupt', CONFIG_FILE + ' is unreadable; using default accounts. A copy was kept as .bad.');
   return defaultAccounts();
+}
+
+const warned = new Set();
+function warnOnce(key, message) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
 }
 
 function saveAccounts(accounts) {
   if (MOCK) { mockAccounts = accounts; return; }
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ accounts }, null, 2));
+  writeFileAtomic(CONFIG_FILE, JSON.stringify({ accounts }, null, 2));
 }
 
 /* ------------------------------------------------------------------ */
@@ -142,7 +162,7 @@ function readCredentials(configDir) {
       : 'Claude Code-credentials-' + crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8);
     try {
       const out = execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
       });
       const j = JSON.parse(out.trim());
       if (j && j.claudeAiOauth) return j.claudeAiOauth;
@@ -195,6 +215,7 @@ function parseWindows(data) {
 /* Open Claude Code chats for one account. Claude Code writes <configDir>/sessions/<pid>.json
    for every running session and touches it while the chat is working. */
 function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; }
 }
 
@@ -211,7 +232,8 @@ function readSessions(configDir) {
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
       const state = activeSessionState(j.status);
       if (!state) continue;
-      const alive = inContainer ? Date.now() - mtime < 10 * 60 * 1000 : pidAlive(j.pid);
+      const alive = inContainer ? Date.now() - mtime < 10 * 60 * 1000
+        : sessionFileFresh(j.pid, mtime, Date.now()) && pidAlive(j.pid);
       if (!alive) continue;
       out.push({
         id: String(j.sessionId || j.pid),
@@ -229,13 +251,23 @@ function readSessions(configDir) {
   return out;
 }
 
+function safeSessions(acc) {
+  try { return readSessions(expandHome(acc.configDir)); } catch { return []; }
+}
+
 async function fetchStatus(acc) {
   const base = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now() };
-  const creds = readCredentials(expandHome(acc.configDir));
+  let creds;
+  try { creds = readCredentials(expandHome(acc.configDir)); } catch (e) {
+    return { ...base, status: 'error', message: 'Could not read the login: ' + (e && e.message ? e.message : e) };
+  }
   if (!creds || !creds.accessToken) {
     return { ...base, status: 'no_login', message: 'No Claude Code login found in this config folder. Claude Desktop can be signed in separately.' };
   }
   const plan = planLabel(creds);
+  if (credentialsExpired(creds, Date.now())) {
+    return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
+  }
   try {
     const res = await fetch(USAGE_URL, {
       headers: {
@@ -246,8 +278,11 @@ async function fetchStatus(acc) {
       },
       signal: AbortSignal.timeout(15000),
     });
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       return { ...base, plan, status: 'expired', message: 'Login expired. Open Claude Code with this account once and it will refresh itself.' };
+    }
+    if (res.status === 403) {
+      return { ...base, plan, status: 'error', message: 'Usage endpoint refused the login (HTTP 403). Re-login may not help; the login may lack access or be blocked.' };
     }
     if (res.status === 429) {
       const ra = Number(res.headers.get('retry-after'));
@@ -259,7 +294,9 @@ async function fetchStatus(acc) {
       return { ...base, plan, status: 'error', retryAt: Date.now() + wait, message: 'Anthropic is rate limiting usage. Next try in ' + Math.ceil(wait / 60000) + ' min.' };
     }
     if (!res.ok) {
-      return { ...base, plan, status: 'error', message: 'Usage endpoint answered HTTP ' + res.status + '.' };
+      let detail = '';
+      try { detail = (await res.text()).replace(/\s+/g, ' ').slice(0, 120); } catch { /* no body */ }
+      return { ...base, plan, status: 'error', message: 'Usage endpoint answered HTTP ' + res.status + '.' + (detail ? ' ' + detail : '') };
     }
     const raw = await res.json();
     const windows = parseWindows(raw);
@@ -315,24 +352,36 @@ function mockStatus(acc, idx) {
 /* history                                                             */
 /* ------------------------------------------------------------------ */
 
-let history = {};
+let history = Object.create(null);
 if (!MOCK) {
-  try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { /* none yet */ }
+  try { history = sanitizeHistory(JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'))); } catch { /* none yet */ }
 }
 let saveTimer = null;
+
+function writeHistoryNow() {
+  try { writeFileAtomic(HISTORY_FILE, JSON.stringify(history)); } catch (e) {
+    warnOnce('history-write', 'Could not save usage history (' + e.message + '). Further failures are not logged.');
+  }
+}
 
 function saveHistory() {
   if (MOCK) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(history)); } catch { /* read-only is fine */ }
-  }, 2000);
+  saveTimer = setTimeout(() => { saveTimer = null; writeHistoryNow(); }, 2000);
+  saveTimer.unref();
+}
+
+function flushHistory() {
+  if (MOCK || !saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  writeHistoryNow();
 }
 
 function recordHistory(id, windows) {
   if (MOCK) return;
   const now = Date.now();
-  const acc = (history[id] ||= {});
+  const acc = (history[id] ||= Object.create(null));
   for (const w of windows) {
     const arr = (acc[w.key] ||= []);
     const last = arr[arr.length - 1];
@@ -369,7 +418,7 @@ function getHistory(id, key, rangeKey) {
     points = [];
     for (let t = Math.ceil(from / step) * step; t <= to; t += step) points.push([t, mockValue(idx, key, t)]);
   } else {
-    points = ((history[id] || {})[key] || []).filter((p) => p[0] >= from);
+    points = historyPoints(history, id, key).filter((p) => p[0] >= from);
   }
   return downsample(points, from, to);
 }
@@ -381,13 +430,25 @@ function getHistory(id, key, rangeKey) {
 const cache = new Map();
 const latestUsage = MOCK ? null : createUsageSnapshot(USAGE_SNAPSHOT_FILE);
 
-async function getStatus(acc, index, force) {
+const inflight = createInflight();
+const lastLivePoll = new Map(); // accountId -> ms of last upstream attempt
+const PAUSED_RECHECK_MS = 15 * 60 * 1000; // slow poll while a window sits at 100%
+
+function getStatus(acc, index, force) {
+  return inflight(acc.id, () => loadStatus(acc, index, force));
+}
+
+async function loadStatus(acc, index, force) {
   latestUsage?.seedFromHistory(acc, history[acc.id], LABELS);
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
   const previous = hit?.value ?? latestUsage?.peek(acc);
-  const nextPollAt = previous?.nextPollAt || nextUsagePollAt(previous, Date.now());
-  if (previous && nextPollAt > Date.now()) {
+  // extra_usage is not a reset-bound limit, so it never pauses polling.
+  const pausable = previous?.windows
+    ? { ...previous, windows: previous.windows.filter((w) => w.key !== 'extra_usage') } : previous;
+  const nextPollAt = previous?.nextPollAt || nextUsagePollAt(pausable, Date.now());
+  const recheckDue = Date.now() - (lastLivePoll.get(acc.id) || 0) >= PAUSED_RECHECK_MS;
+  if (previous && nextPollAt > Date.now() && !force && !recheckDue) {
     latestUsage?.deferUntil(acc, nextPollAt);
     const paused = previous.stale
       ? { ...previous, nextPollAt, staleMessage: 'Next usage check at estimated reset.' }
@@ -400,7 +461,12 @@ async function getStatus(acc, index, force) {
   const bo = backoff.get(acc.id);
   if (bo && Date.now() < bo.until && previous) return previous;
 
-  let value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc);
+  lastLivePoll.set(acc.id, Date.now());
+  let value;
+  try { value = MOCK ? mockStatus(acc, index) : await fetchStatus(acc); } catch (e) {
+    value = { id: acc.id, name: acc.name, configDir: acc.configDir, fetchedAt: Date.now(), status: 'error',
+      message: 'Could not check usage: ' + (e && e.message ? e.message : e) };
+  }
   if (value.windows) value = { ...value, windows: visibleUsageWindows(value.plan, value.windows) };
   if (value.status === 'ok') {
     backoff.delete(acc.id);
@@ -419,32 +485,14 @@ async function getStatus(acc, index, force) {
 /* ------------------------------------------------------------------ */
 
 function hostOk(req) {
-  if (ALLOW_ANY_HOST) return true;
-  const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-  return ALLOWED_HOSTS.has(h);
+  return ALLOW_ANY_HOST || hostAllowed(req.headers.host, ALLOWED_HOSTS);
 }
 
+/* Mutating routes: same-origin browser metadata, plus DASHBOARD_TOKEN when configured.
+   With ALLOW_ANY_HOST the host check is off, so a token is required (set DASHBOARD_TOKEN). */
 function originOk(req) {
-  const o = req.headers.origin;
-  if (!o) return true;
-  try { return new URL(o).host === req.headers.host; } catch { return false; }
-}
-
-function sendJson(res, code, obj) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify(obj));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (c) => {
-      data += c;
-      if (data.length > 10000) { reject(new Error('too large')); req.destroy(); }
-    });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
-  });
+  if (ALLOW_ANY_HOST && !DASHBOARD_TOKEN) return false;
+  return originAllowed(req.headers) && tokenOk(req.headers, DASHBOARD_TOKEN);
 }
 
 const TYPES = {
@@ -455,27 +503,34 @@ const TYPES = {
 
 function serveStatic(req, res, pathname) {
   if (!fs.existsSync(DIST)) {
-    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
     return res.end('API is running. Open http://localhost:5173 (npm run dev), or run "npm run build" first to serve the app from here.');
   }
-  let rel = decodeURIComponent(pathname);
-  if (rel === '/' || rel === '') rel = '/index.html';
-  let file = path.normalize(path.join(DIST, rel));
-  if (!file.startsWith(DIST)) { res.writeHead(403); return res.end('Forbidden'); }
-  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html'); // SPA fallback
+  const found = resolveStaticPath(DIST, pathname);
+  if (found.status !== 200) {
+    res.writeHead(found.status, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+    return res.end(found.status === 400 ? 'Bad request' : found.status === 403 ? 'Forbidden' : 'Not found');
+  }
+  const file = found.file;
   const ext = path.extname(file).toLowerCase();
   const immutable = file.includes(path.sep + 'assets' + path.sep);
-  res.writeHead(200, {
+  streamFile(res, file, {
     'Content-Type': TYPES[ext] || 'application/octet-stream',
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
-  });
-  fs.createReadStream(file).pipe(res);
+  }, req.method);
 }
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (!hostOk(req)) { res.writeHead(403); return res.end('Forbidden'); }
+    if (!hostOk(req)) {
+      warnOnce('host:' + req.headers.host, 'Rejected Host header "' + req.headers.host + '". Add it to ALLOWED_HOSTS if intended (ports are ignored, case-insensitive).');
+      res.writeHead(403, SECURITY_HEADERS); return res.end('Forbidden');
+    }
     const url = new URL(req.url, 'http://localhost');
+
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      return sendJson(res, 200, { ok: true, uptime: Math.round(process.uptime()), mock: MOCK });
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       const force = url.searchParams.get('force') === '1';
@@ -483,7 +538,7 @@ const server = http.createServer(async (req, res) => {
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
       // sessions are read fresh on every request (cheap, local), usage is cached
       const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir,
-        sessions: MOCK ? [] : readSessions(expandHome(accounts[i].configDir)) }));
+        sessions: MOCK ? [] : safeSessions(accounts[i]) }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
 
@@ -496,6 +551,8 @@ const server = http.createServer(async (req, res) => {
       const id = url.searchParams.get('id') || '';
       const key = url.searchParams.get('key') || 'five_hour';
       const range = url.searchParams.get('range') || '24h';
+      if (!Object.hasOwn(LABELS, key)) return sendJson(res, 400, { error: 'Unknown usage key.' });
+      if (!Object.hasOwn(RANGES, range)) return sendJson(res, 400, { error: 'Unknown range.' });
       return sendJson(res, 200, { points: getHistory(id, key, range) });
     }
 
@@ -503,11 +560,17 @@ const server = http.createServer(async (req, res) => {
       if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {
         return sendJson(res, 403, { error: 'Forbidden' });
       }
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await parseJsonBody(req);
       const name = String(body.name || '').trim().slice(0, 40);
-      const configDir = String(body.configDir || '').trim().slice(0, 300);
-      if (!name || !configDir) return sendJson(res, 400, { error: 'Name and config folder are required.' });
+      const rawDir = String(body.configDir || '').trim().slice(0, 300);
+      if (!name || !rawDir) return sendJson(res, 400, { error: 'Name and config folder are required.' });
       const accounts = [...loadAccounts()];
+      let configDir = rawDir;
+      if (!MOCK) {
+        try { configDir = validateConfigDir(rawDir, accounts.map((a) => a.configDir)); } catch (error) {
+          return sendJson(res, 400, { error: error.message });
+        }
+      }
       let id = slug(name);
       while (accounts.some((a) => a.id === id)) id = slug(name) + '-' + crypto.randomBytes(2).toString('hex');
       accounts.push({ id, name, configDir });
@@ -520,18 +583,30 @@ const server = http.createServer(async (req, res) => {
       if (MOCK || ACCOUNTS_DIR || process.platform !== 'win32') {
         return sendJson(res, 400, { error: 'Sign-in launcher requires a direct Windows installation.' });
       }
-      const id = decodeURIComponent(url.pathname.split('/')[3]);
+      const id = decodeId(url.pathname.split('/')[3]);
       const account = loadAccounts().find((candidate) => candidate.id === id);
       if (!account) return sendJson(res, 404, { error: 'Account not found.' });
+      const configDir = expandHome(account.configDir);
+      if (!fs.existsSync(configDir)) return sendJson(res, 400, { error: 'Config folder does not exist.' });
+      if (Date.now() - (loginStartedAt.get(id) || 0) < 15000) {
+        return sendJson(res, 409, { error: 'A sign-in window was just opened for this account.' });
+      }
+      loginStartedAt.set(id, Date.now());
       try {
         const child = spawn('cmd.exe', ['/k', 'claude auth login'], {
-          env: { ...process.env, CLAUDE_CONFIG_DIR: expandHome(account.configDir) },
+          env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
           detached: true, stdio: 'ignore', windowsHide: false,
         });
-        child.on('error', (error) => console.error('Could not start Claude sign-in:', error));
+        await new Promise((resolve, reject) => {
+          child.once('spawn', resolve);
+          child.once('error', reject);
+        });
+        child.on('error', (error) => console.error('Sign-in process error:', error));
         child.unref();
         return sendJson(res, 200, { ok: true });
       } catch (error) {
+        loginStartedAt.delete(id);
+        console.error('Could not start Claude sign-in:', error);
         return sendJson(res, 500, { error: 'Could not start Claude sign-in: ' + error.message });
       }
     }
@@ -541,7 +616,7 @@ const server = http.createServer(async (req, res) => {
       if (!originOk(req) || !String(req.headers['content-type'] || '').includes('application/json')) {
         return sendJson(res, 403, { error: 'Forbidden' });
       }
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await parseJsonBody(req);
       const accounts = loadAccounts();
       const source = accounts.find((account) => account.id === body.sourceId);
       const target = accounts.find((account) => account.id === body.targetId);
@@ -577,10 +652,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-labels') {
       if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Desktop label sync requires a direct installation.' });
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
+      if (labelSyncBusy) return sendJson(res, 409, { error: 'Desktop label sync is already running.' });
+      labelSyncBusy = true;
       try {
-        if (desktopRunning()) return sendJson(res, 409, { error: 'Fully quit every Claude Desktop instance, including tray icons, then retry.' });
-        if (labelSyncBusy) return sendJson(res, 409, { error: 'Desktop label sync is already running.' });
-        labelSyncBusy = true;
+        if (await desktopRunning()) return sendJson(res, 409, { error: 'Fully quit every Claude Desktop instance, including tray icons, then retry.' });
         const profiles = findWindowsDesktopProfiles();
         const result = await syncMergedDesktopLabelsMany(profiles);
         labelSyncStatus = { ...labelSyncStatus, lastRun: Date.now(), lastError: null };
@@ -606,9 +681,14 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/accounts/')) {
       if (!originOk(req)) return sendJson(res, 403, { error: 'Forbidden' });
-      const id = decodeURIComponent(url.pathname.slice('/api/accounts/'.length));
-      saveAccounts(loadAccounts().filter((a) => a.id !== id));
+      const id = decodeId(url.pathname.slice('/api/accounts/'.length));
+      const before = loadAccounts();
+      if (!before.some((a) => a.id === id)) return sendJson(res, 404, { error: 'Account not found.' });
+      saveAccounts(before.filter((a) => a.id !== id));
       cache.delete(id);
+      backoff.delete(id);
+      lastLivePoll.delete(id);
+      if (Object.hasOwn(history, id)) { delete history[id]; saveHistory(); }
       latestUsage?.forget(id);
       return sendJson(res, 200, { ok: true });
     }
@@ -617,11 +697,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 404, { error: 'Not found' });
     }
 
-    if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res, url.pathname);
-    res.writeHead(405);
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (DASHBOARD_TOKEN && url.searchParams.get('token') === DASHBOARD_TOKEN) {
+        res.setHeader('Set-Cookie', 'dashboard_token=' + DASHBOARD_TOKEN + '; Path=/; HttpOnly; SameSite=Strict');
+      }
+      return serveStatic(req, res, url.pathname);
+    }
+    res.writeHead(405, SECURITY_HEADERS);
     res.end('Method not allowed');
   } catch (e) {
-    sendJson(res, 500, { error: String(e && e.message ? e.message : e) });
+    if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+    console.error('Request failed:', req.method, req.url, e);
+    if (!res.headersSent) sendJson(res, 500, { error: 'Internal server error.' });
+    else res.destroy();
   }
 });
 
@@ -651,7 +739,9 @@ if (!MOCK) {
 server.listen(PORT, HOST, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`Claude usage API listening on ${url}${MOCK ? '  (MOCK DATA)' : ''}`);
-  if (ALLOW_ANY_HOST) console.log('WARNING: any host name is accepted. Only do this on a network you trust.');
+  if (ALLOW_ANY_HOST) console.log('WARNING: any host name is accepted. Only do this on a network you trust.' +
+    (DASHBOARD_TOKEN ? ' Changes need DASHBOARD_TOKEN (open /?token=... once to set the cookie).'
+      : ' Changes (add/delete account, sync, sign-in) are blocked until DASHBOARD_TOKEN is set.'));
   if (process.env.NO_OPEN !== '1' && fs.existsSync(DIST)) {
     try {
       const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
@@ -689,7 +779,7 @@ if (DESKTOP_AUTO_SYNC) {
     try {
       const profiles = findWindowsDesktopProfiles();
       const ids = Object.keys(profiles);
-      const running = desktopProfileState(profiles);
+      const running = await desktopProfileState(profiles);
       for (const profile of ids) {
         if (running[profile]) {
           profileClosedChecks[profile] = 0;
@@ -727,7 +817,7 @@ if (DESKTOP_AUTO_SYNC) {
       labelSyncBusy = true;
       const result = await syncMergedDesktopLabelsMany(profiles);
       labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
-      if (!Object.values(desktopProfileState(findWindowsDesktopProfiles())).some(Boolean)) syncedDuringClosure = true;
+      if (!Object.values(await desktopProfileState(profiles)).some(Boolean)) syncedDuringClosure = true;
       if (result.titles || result.groups) console.log(`Desktop labels: ${result.titles} titles, ${result.groups} groups, ${result.assignments} assignments`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -737,3 +827,13 @@ if (DESKTOP_AUTO_SYNC) {
   };
   setInterval(syncClosedDesktopLabels, 30_000).unref();
 }
+
+function shutdown() {
+  flushHistory();
+  server.close();
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
+process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
