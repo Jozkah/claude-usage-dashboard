@@ -27,13 +27,13 @@
   --frame: #f3f3f4;
   --line: #e5e7eb;
   --fg: #1f2937;
-  --muted-fg: #6b7280;
-  --subtle-fg: #9ca3af;
+  --muted-fg: #4b5563;
+  --subtle-fg: #6b7280;
   --primary: #1f2937;
   --primary-fg: #ffffff;
-  --good: #059669;
-  --warn: #d97706;
-  --bad: #ef4444;
+  --good: #047857;
+  --warn: #b45309;
+  --bad: #dc2626;
   --accent: #6366f1;
   --chart-bar: #ececed;
   --chart-grid: #f0f0f1;
@@ -49,7 +49,7 @@
   --line: #26262c;
   --fg: #f4f4f5;
   --muted-fg: #a1a1aa;
-  --subtle-fg: #71717a;
+  --subtle-fg: #8b8b96;
   --primary: #f4f4f5;
   --primary-fg: #09090b;
   --good: #34d399;
@@ -100,7 +100,7 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shine 4.5s linear infinite;
+  animation: shine 2.8s ease-out 1 both; /* one-shot: an infinite background-position animation repaints forever */
 }
 
 /* Cursor spotlight on cards */
@@ -137,11 +137,18 @@ body {
 }
 
 /* Soft drifting background glow */
-.aurora-blob { position: absolute; border-radius: 9999px; filter: blur(90px); will-change: transform; }
+.aurora-blob { position: absolute; border-radius: 9999px; filter: blur(70px); }
 
 .live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--good); }
 .live-dot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--good); animation: ping-dot 2s ease-out infinite; }
 
+/* Pause every running animation while the tab is hidden (class set in App) */
+html.page-hidden *, html.page-hidden *::before, html.page-hidden *::after { animation-play-state: paused !important; }
+
+/* Visible keyboard focus everywhere */
+:where(button, a, summary, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  .aurora-blob, .beam::after { animation: none !important; }
 }

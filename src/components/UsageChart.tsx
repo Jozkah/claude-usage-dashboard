@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Point, RangeKey } from '../lib/types';
 import { colorVar, levelFor } from '../lib/format';
 
@@ -14,6 +14,9 @@ interface Props {
   /** Changes when the series changes, to replay the entrance animation. */
   seriesKey: string;
   ready: boolean;
+  /** Request failed: show an error with a retry instead of the empty state. */
+  error?: boolean;
+  onRetry?: () => void;
 }
 
 function tickLabel(ts: number, range: RangeKey) {
@@ -23,7 +26,15 @@ function tickLabel(ts: number, range: RangeKey) {
     : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
+/** Full date and time, so a 7d reading says which Tuesday and what time. */
+function tipLabel(ts: number, range: RangeKey) {
+  return new Date(ts).toLocaleString([], range === '6h'
+    ? { hour: '2-digit', minute: '2-digit' }
+    : { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+export const UsageChart = memo(function UsageChart({ points, range, mode, seriesKey, ready, error = false, onRetry }: Props) {
+  const gradId = useId().replace(/:/g, '');
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
@@ -44,7 +55,7 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
   const from = useMemo(() => {
     const t = points.length ? Math.max(Date.now(), points[points.length - 1][0]) : Date.now();
     return t - span;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // deliberately keyed on the data, not on the Date.now()/closure helpers
   }, [points, span]);
 
   const bars = useMemo(() => {
@@ -62,10 +73,11 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
   const y = (v: number) => PAD.t + plotH * (1 - v / 100);
   const xT = (t: number) => PAD.l + ((t - from) / span) * plotW;
 
-  const empty = ready && points.length === 0;
+  const empty = ready && !error && points.length === 0;
+  const failed = ready && error && points.length === 0;
 
-  /* ----- hover handling ----- */
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  /* ----- hover handling (pointer events so touch works too) ----- */
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - r.left;
     if (mode === 'bars') {
@@ -80,6 +92,20 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
         if (d < bd) { bd = d; best = i; }
       });
       setHover(best >= 0 ? best : null);
+    }
+  };
+
+  /* keyboard: arrows step through readings */
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const count = mode === 'bars' ? bars.length : points.length;
+    let i = hover == null ? (dir === 1 ? -1 : count) : hover;
+    for (;;) {
+      i += dir;
+      if (i < 0 || i >= count) return;
+      if (mode === 'area' || bars[i].v != null) { setHover(i); return; }
     }
   };
 
@@ -100,16 +126,32 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
     const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)} ${py.toFixed(1)}`).join(' ');
     const fill = `${line} L${pts[pts.length - 1][0].toFixed(1)} ${PAD.t + plotH} L${pts[0][0].toFixed(1)} ${PAD.t + plotH} Z`;
     return { line, fill };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // deliberately keyed on the data, not on the Date.now()/closure helpers
   }, [points, width, from, span]);
 
   const ticks = useMemo(() => Array.from({ length: 6 }, (_, i) => from + (span * (i + 0.5)) / 6), [from, span]);
   const lastV = points.length ? points[points.length - 1][1] : 0;
+  const peakV = points.reduce((m, p) => Math.max(m, p[1]), 0);
+  const summary = points.length
+    ? `Usage chart, ${range}. Latest ${Math.round(lastV)}%, peak ${Math.round(peakV)}%, ${points.length} readings. Use left and right arrow keys to read values.`
+    : 'Usage chart with no readings in this range.';
   const areaColor = colorVar(levelFor(lastV));
 
   return (
-    <div ref={wrap} className="relative select-none" style={{ height: H }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-      <svg width={width} height={H} className="block overflow-visible">
+    <div
+      ref={wrap}
+      className="relative touch-pan-y select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      style={{ height: H }}
+      tabIndex={0}
+      role="group"
+      aria-label={summary}
+      onPointerMove={onMove}
+      onPointerDown={onMove}
+      onPointerLeave={() => setHover(null)}
+      onKeyDown={onKey}
+      onBlur={() => setHover(null)}
+    >
+      <svg width={width} height={H} className="block overflow-visible" role="img" aria-label={summary}>
         {/* grid + right axis */}
         {[0, 25, 50, 75, 100].map((v) => (
           <g key={v}>
@@ -123,12 +165,12 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
           </text>
         ))}
 
-        {empty ? null : mode === 'bars' ? (
+        {empty || failed ? null : mode === 'bars' ? (
           <g key={seriesKey + range}>
             {bars.map((b, i) => {
               const bw = plotW / bars.length;
               const gap = Math.max(2, bw * 0.28);
-              const h = b.v == null ? 0 : Math.max(3, plotH * (b.v / 100));
+              const h = b.v == null ? 0 : b.v <= 0 ? 1 : Math.max(3, plotH * (b.v / 100)); // real zero = thin baseline
               const active = hover === i;
               return (
                 <rect
@@ -154,12 +196,12 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
         ) : (
           <g key={seriesKey + range} className="animate-draw">
             <defs>
-              <linearGradient id="area-fill" x1="0" x2="0" y1="0" y2="1">
+              <linearGradient id={gradId} x1="0" x2="0" y1="0" y2="1">
                 <stop offset="0%" stopColor={areaColor} stopOpacity="0.26" />
                 <stop offset="100%" stopColor={areaColor} stopOpacity="0" />
               </linearGradient>
             </defs>
-            <path d={areaPath.fill} fill="url(#area-fill)" />
+            <path d={areaPath.fill} fill={`url(#${gradId})`} />
             <path d={areaPath.line} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" style={{ stroke: areaColor }} />
           </g>
         )}
@@ -181,8 +223,14 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md bg-primary px-2 py-1 text-xs font-medium whitespace-nowrap text-primary-fg shadow-lg"
           style={{ left: Math.min(Math.max(tip.x, 60), width - PAD.r - 20), top: Math.max(tip.y - 8, 24) }}
         >
-          {Math.round(tip.v)}% · {tickLabel(tip.t, range)}
-          {range !== '6h' && range !== '24h' ? '' : ''}
+          {Math.round(tip.v)}% · {tipLabel(tip.t, range)}
+        </div>
+      )}
+
+      {failed && (
+        <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+          <div className="text-sm font-medium">Could not load readings</div>
+          {onRetry && <button onClick={onRetry} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium">Retry</button>}
         </div>
       )}
 
@@ -196,4 +244,4 @@ export function UsageChart({ points, range, mode, seriesKey, ready }: Props) {
       )}
     </div>
   );
-}
+});

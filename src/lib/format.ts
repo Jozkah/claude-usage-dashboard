@@ -30,7 +30,7 @@ export function paceFor(w: UsageWindow, now: number): Pace {
 }
 
 export function fmtDur(ms: number): string {
-  if (ms <= 0) return 'now';
+  if (!Number.isFinite(ms) || ms < 1000) return 'now';
   const s = Math.floor(ms / 1000);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
@@ -46,14 +46,22 @@ export function fmtClock(ts: number | string): string {
   const d = new Date(ts);
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  if (sameDay) return time;
+  // within a week a weekday is unambiguous; further out (or in the past) show the date
+  const days = Math.abs(d.getTime() - Date.now()) / 864e5;
+  const date = days < 6 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${date} ${time}`;
 }
 
 export function fmtAgo(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 5) return 'just now';
   if (s < 60) return `${s}s ago`;
-  return `${Math.round(s / 60)}m ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 /** Percentage points left on the tightest of the two main windows. */

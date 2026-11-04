@@ -1,4 +1,4 @@
-import { KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
+import { EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
@@ -15,6 +15,8 @@ interface Props {
   onRemove: (a: Account) => void;
   onLogin: (a: Account) => Promise<void>;
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void;
+  /** Opens the account action menu from a visible button (keyboard and touch friendly). */
+  onMenu?: (anchor: HTMLElement) => void;
 }
 
 function Gauge({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
@@ -98,7 +100,7 @@ function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Accoun
   );
 }
 
-export function AccountCard({ account: a, now, delay, onRemove, onLogin, onContextMenu }: Props) {
+export function AccountCard({ account: a, now, delay, onRemove, onLogin, onContextMenu, onMenu }: Props) {
   const [signingIn, setSigningIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const needsLogin = ['no_login', 'expired'].includes(a.authStatus ?? a.status);
@@ -117,6 +119,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
     <button
       onClick={() => onRemove(a)}
       title="Remove from dashboard (does not touch the login)"
+      aria-label={`Remove ${a.name} from dashboard`}
       className="rounded-md p-1 text-subtle-fg transition-colors hover:bg-bad/10 hover:text-bad"
     >
       <Trash2 className="size-3.5" />
@@ -125,19 +128,31 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   const right = (
     <div className="flex items-center gap-2">
       {a.plan && <Chip tone="accent">{a.plan}</Chip>}
+      {onMenu && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onMenu(e.currentTarget); }}
+          aria-haspopup="menu"
+          aria-label={`${a.name} actions`}
+          title="Account actions"
+          className="rounded-md p-1 text-subtle-fg transition-colors hover:bg-frame hover:text-fg"
+        >
+          <EllipsisVertical className="size-3.5" />
+        </button>
+      )}
       {remove}
     </div>
   );
 
   if (a.status !== 'ok' || !a.windows?.length) {
-    const Icon = a.status === 'no_login' ? KeyRound : a.status === 'expired' ? KeyRound : a.status === 'error' ? WifiOff : TriangleAlert;
+    const Icon = a.status === 'no_login' || a.status === 'expired' ? KeyRound : a.status === 'error' ? WifiOff : TriangleAlert;
+    const message = a.message || (a.status === 'ok' ? 'The server returned no usage windows for this account yet. It will retry on the next poll.' : 'No details were reported. It will retry on the next poll.');
     return (
       <FrameCard title={a.name} icon={<span className="size-2 rounded-full bg-warn" />} right={right} delay={delay} onContextMenu={onContextMenu}>
         <div className="flex gap-3 p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/12 text-warn"><Icon className="size-4" /></div>
           <div className="min-w-0">
             <div className="text-sm font-medium">{a.status === 'no_login' ? 'CLI usage login missing' : a.status === 'expired' ? 'Login expired' : 'Can’t read usage'}</div>
-            <p className="mt-0.5 text-[13px] text-muted-fg">{a.message}</p>
+            <p className="mt-0.5 text-[13px] text-muted-fg">{message}</p>
             {loginButton}
             <p className="mt-2 truncate text-xs text-subtle-fg">{a.configDir}</p>
           </div>

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { WifiOff } from 'lucide-react';
-import { removeAccount, shareLocalChats, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useTheme, useUsage } from './lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { WifiOff, X } from 'lucide-react';
+import { removeAccount, shareLocalChats, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
+import { useTheme } from './lib/theme';
+import { useAlerts, useNotifyPref } from './lib/alerts';
+import { fmtAgo } from './lib/format';
 import type { Account, RangeKey } from './lib/types';
 import { Aurora } from './components/Aurora';
 import { Header } from './components/Header';
@@ -9,124 +12,177 @@ import { StatRow } from './components/StatRow';
 import { TrendCard } from './components/TrendCard';
 import { ResetTimeline } from './components/ResetTimeline';
 import { AccountCard } from './components/AccountCard';
+import { AccountMenu, type MenuAction } from './components/AccountMenu';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LimitTable } from './components/LimitTable';
 import { DailyUsage } from './components/DailyUsage';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { Modal } from './components/Modal';
 
+type WithInert = HTMLElement & { inert?: boolean };
+
 export default function App() {
   const { data, loading, error, lastLoad, refresh } = useUsage();
   const now = useNow(1000);
   const { dark, toggle } = useTheme();
+  const notify = useNotifyPref();
 
   const [selected, setSelected] = useState('all');
   const [range, setRange] = useState<RangeKey>('24h');
   const [addOpen, setAddOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchReq, setSearchReq] = useState(0);
   const [search, setSearch] = useState('');
   const [toRemove, setToRemove] = useState<Account | null>(null);
+  const [removeError, setRemoveError] = useState('');
+  const [removing, setRemoving] = useState(false);
   const [contextAccount, setContextAccount] = useState<{ account: Account; x: number; y: number } | null>(null);
-  const [chatShareMessage, setChatShareMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const drawer = useRef<HTMLElement>(null);
 
-  const accounts = data?.accounts ?? [];
+  const accounts = useMemo(() => data?.accounts ?? [], [data]);
   const visible = selected === 'all' ? accounts : accounts.filter((a) => a.id === selected);
-  const tick = data?.serverTime ?? 0;
+  // history only changes when a new reading is recorded, not on every poll
+  const tick = useMemo(() => accounts.reduce((m, a) => Math.max(m, a.fetchedAt || 0), 0), [accounts]);
 
-  // fall back to the overview if the selected account disappears
+  useAlerts(accounts, notify.enabled);
+
+  // pause animations while the tab is hidden
   useEffect(() => {
-    const blockContextMenu = (e: globalThis.MouseEvent) => e.preventDefault();
-    window.addEventListener('contextmenu', blockContextMenu);
-    return () => window.removeEventListener('contextmenu', blockContextMenu);
+    const sync = () => document.documentElement.classList.toggle('page-hidden', document.hidden);
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
   }, []);
 
+  // status banner: auto-dismiss after a while
   useEffect(() => {
-    if (!contextAccount) return;
-    const close = () => setContextAccount(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('click', close);
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
-  }, [contextAccount]);
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 12_000);
+    return () => clearTimeout(id);
+  }, [notice]);
+
+  const openMenuAt = useCallback((account: Account, x: number, y: number) => setContextAccount({ account, x, y }), []);
 
   const openAccountMenu = (account: Account, e: MouseEvent) => {
     e.preventDefault();
-    setContextAccount({ account, x: e.clientX, y: e.clientY });
+    openMenuAt(account, e.clientX, e.clientY);
   };
 
-  const syncChats = async (target: Account) => {
-    const source = accounts.find((account) => account.id === 'personal' && account.id !== target.id);
-    if (!source) return;
-    try { setChatShareMessage(await shareLocalChats(source.id, target.id)); }
-    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not share local chats.'); }
+  const openMenuFromButton = (account: Account, anchor: HTMLElement) => {
+    const r = anchor.getBoundingClientRect();
+    openMenuAt(account, r.right - 256, r.bottom + 4);
+  };
+
+  const runAction = async (fn: () => Promise<string>, fallback: string) => {
     setContextAccount(null);
+    try { setNotice(await fn()); }
+    catch (err) { setNotice(err instanceof Error ? err.message : fallback); }
   };
 
-  const syncDesktop = async () => {
-    try { setChatShareMessage(await syncDesktopChats()); }
-    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync Desktop sessions.'); }
-    setContextAccount(null);
+  const menuActions = (target: Account): MenuAction[] => {
+    // source for chat sharing: the 'personal' account when present, otherwise any other account
+    const source = accounts.find((a) => a.id === 'personal' && a.id !== target.id) ?? accounts.find((a) => a.id !== target.id);
+    if (!source) return [];
+    const out: MenuAction[] = [
+      { label: `Share ${source.name} CLI chats with ${target.name}`, run: () => void runAction(() => shareLocalChats(source.id, target.id, target.name), 'Could not share local chats.') },
+      { label: 'Sync local Desktop chats across profiles', run: () => void runAction(syncDesktopChats, 'Could not sync Desktop sessions.') },
+      { label: 'Sync Desktop chat names and groups', run: () => void runAction(syncDesktopLabels, 'Could not sync Desktop names and groups.') },
+    ];
+    if (target.id === 'work') out.push({ label: 'Copy local Code plugins and skills to Work', run: () => void runAction(syncCodeSetup, 'Could not sync local Claude Code setup.') });
+    return out;
   };
 
-  const syncLabels = async () => {
-    try { setChatShareMessage(await syncDesktopLabels()); }
-    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync Desktop names and groups.'); }
-    setContextAccount(null);
-  };
-
-  const syncPlugins = async () => {
-    try { setChatShareMessage(await syncCodeSetup()); }
-    catch (error) { setChatShareMessage(error instanceof Error ? error.message : 'Could not sync local Claude Code setup.'); }
-    setContextAccount(null);
-  };
-
-  const signInForUsage = async (account: Account) => {
+  const signInForUsage = useCallback(async (account: Account) => {
     await startAccountLogin(account.id);
-    setChatShareMessage(`Claude Code sign-in opened for ${account.name}. Finish sign-in there; usage will refresh automatically.`);
-  };
+    setNotice(`Claude Code sign-in opened for ${account.name}. Finish sign-in there; usage will refresh automatically.`);
+  }, []);
 
+  // fall back to the overview if the selected account disappears
   useEffect(() => {
     if (selected !== 'all' && data && !accounts.some((a) => a.id === selected)) setSelected('all');
   }, [data, accounts, selected]);
 
   // refresh a few seconds after a window resets
   const resetSeen = useRef(new Set<string>());
+  const resetTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
+    const present = new Set<string>();
     for (const a of accounts) {
       for (const w of a.windows ?? []) {
         if (!w.resetsAt) continue;
-        const id = a.id + w.resetsAt;
-        if (!a.stale && new Date(w.resetsAt).getTime() < now && now - new Date(w.resetsAt).getTime() < 60000 && !resetSeen.current.has(id)) {
+        const id = a.id + '|' + w.resetsAt;
+        present.add(id);
+        const at = new Date(w.resetsAt).getTime();
+        if (!a.stale && at < now && now - at < 60000 && !resetSeen.current.has(id)) {
           resetSeen.current.add(id);
-          setTimeout(() => void refresh(true), 4000);
+          const timer = setTimeout(() => { resetTimers.current.delete(timer); void refresh(true); }, 4000);
+          resetTimers.current.add(timer);
         }
       }
     }
+    for (const id of resetSeen.current) if (!present.has(id)) resetSeen.current.delete(id); // prune
   }, [now, accounts, refresh]);
+  useEffect(() => {
+    const timers = resetTimers.current;
+    return () => { timers.forEach(clearTimeout); timers.clear(); };
+  }, []);
 
-  // ⌘K / Ctrl+K focuses the account search
+  // ⌘K / Ctrl+K focuses the account search (opening the drawer only on narrow screens)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setMenuOpen(true);
-        // two sidebars exist (desktop + mobile drawer): focus whichever one is visible
-        setTimeout(() => {
-          const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-account-search]'));
-          inputs.find((el) => el.getClientRects().length > 0 && el.getBoundingClientRect().right > 0)?.focus();
-        }, 60);
+        if (!matchMedia('(min-width: 1024px)').matches) setMenuOpen(true);
+        setSearchReq((n) => n + 1);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const select = useCallback((id: string) => { setSelected(id); setMenuOpen(false); }, []);
+  // mobile drawer: hidden from tab order and screen readers while closed
+  useEffect(() => {
+    if (drawer.current) (drawer.current as WithInert).inert = !menuOpen;
+  }, [menuOpen]);
+
+  // focus the visible search field after ⌘K or when the drawer opens; give focus back on close
+  const searchSeen = useRef(0);
+  useEffect(() => {
+    const requested = searchReq !== searchSeen.current;
+    searchSeen.current = searchReq;
+    if (!menuOpen && !requested) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-account-search]'));
+    inputs.find((el) => el.getClientRects().length > 0 && el.getBoundingClientRect().right > 0)?.focus();
+    return () => { if (menuOpen && opener && document.contains(opener)) opener.focus(); };
+  }, [menuOpen, searchReq]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  const select = useCallback((id: string) => { setSelected(id); setMenuOpen(false); setNotice(null); }, []);
+  const closeAdd = useCallback(() => setAddOpen(false), []);
+  const onAdded = useCallback(() => void refresh(true), [refresh]);
+  const closeRemove = useCallback(() => { setToRemove(null); setRemoveError(''); }, []);
+  const closeContext = useCallback(() => setContextAccount(null), []);
 
   const confirmRemove = async () => {
-    if (!toRemove) return;
-    await removeAccount(toRemove.id);
-    setToRemove(null);
-    void refresh(true);
+    if (!toRemove || removing) return;
+    setRemoving(true);
+    setRemoveError('');
+    try {
+      await removeAccount(toRemove.id);
+      closeRemove();
+      void refresh(true);
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Could not remove the account.');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const crumb = selected === 'all' ? 'All accounts' : accounts.find((a) => a.id === selected)?.name ?? 'Account';
@@ -148,13 +204,23 @@ export default function App() {
       {/* mobile sidebar */}
       <div className={`fixed inset-0 z-40 lg:hidden ${menuOpen ? '' : 'pointer-events-none'}`}>
         <div className={`absolute inset-0 bg-black/40 transition-opacity ${menuOpen ? 'opacity-100' : 'opacity-0'}`} onClick={() => setMenuOpen(false)} />
-        <aside className={`absolute inset-y-0 left-0 w-[272px] border-r border-line transition-transform duration-300 ease-out-expo ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <aside
+          id="mobile-sidebar"
+          ref={drawer}
+          role="dialog"
+          aria-label="Accounts"
+          aria-modal={menuOpen}
+          className={`absolute inset-y-0 left-0 w-[272px] border-r border-line transition-transform duration-300 ease-out-expo ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        >
           {sidebar}
         </aside>
       </div>
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <Header crumb={crumb} dark={dark} loading={loading} onToggleTheme={toggle} onRefresh={() => void refresh(true)} onMenu={() => setMenuOpen(true)} />
+        <Header
+          crumb={crumb} dark={dark} loading={loading} onToggleTheme={toggle} onRefresh={() => void refresh(true)}
+          onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} notify={notify}
+        />
 
         <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-7 pb-14 sm:px-6">
           <div className="animate-rise mb-6">
@@ -165,13 +231,22 @@ export default function App() {
           </div>
 
           {error && (
-            <div className="animate-rise mb-5 flex items-center gap-3 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm">
-              <WifiOff className="size-4 text-bad" />
-              The dashboard server isn’t reachable ({error}). Is <code className="rounded bg-frame px-1">npm run dev</code> still running?
+            <div role="alert" className="animate-rise mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm">
+              <WifiOff className="size-4 shrink-0 text-bad" />
+              <span className="min-w-0 flex-1">
+                The dashboard server isn’t reachable ({error}).
+                {data && lastLoad ? ` Showing the last reading from ${fmtAgo(now - lastLoad)}.` : ''}
+              </span>
+              <button onClick={() => void refresh(true)} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium transition-colors hover:border-accent/50">Retry</button>
             </div>
           )}
 
-          {chatShareMessage && <div role="status" className="mb-5 rounded-xl border border-line bg-card px-4 py-3 text-sm">{chatShareMessage}</div>}
+          {notice && (
+            <div role="status" className="mb-5 flex items-start gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm">
+              <span className="min-w-0 flex-1">{notice}</span>
+              <button onClick={() => setNotice(null)} aria-label="Dismiss message" className="rounded-md p-0.5 text-muted-fg transition-colors hover:bg-frame hover:text-fg"><X className="size-4" /></button>
+            </div>
+          )}
 
           {!data && !error && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -181,13 +256,13 @@ export default function App() {
 
           {data && (
             <div className="flex flex-col gap-4">
-              <StatRow accounts={visible} now={now} tick={tick} />
+              <ErrorBoundary label="Summary cards"><StatRow accounts={visible} now={now} tick={tick} /></ErrorBoundary>
 
               <div className="grid gap-4 xl:grid-cols-3">
                 <div className="min-w-0 xl:col-span-2">
-                  <TrendCard accounts={accounts} preferredId={selected} tick={tick} range={range} onRange={setRange} />
+                  <ErrorBoundary label="Usage trend"><TrendCard accounts={accounts} preferredId={selected} tick={tick} range={range} onRange={setRange} /></ErrorBoundary>
                 </div>
-                <ResetTimeline accounts={accounts} now={now} />
+                <ErrorBoundary label="Upcoming resets"><ResetTimeline accounts={accounts} now={now} /></ErrorBoundary>
               </div>
 
               <div className="mt-2 flex items-center justify-between">
@@ -198,7 +273,12 @@ export default function App() {
               </div>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))]">
                 {visible.map((a, i) => (
-                  <AccountCard key={a.id} account={a} now={now} delay={i * 80} onRemove={setToRemove} onLogin={signInForUsage} onContextMenu={(e) => openAccountMenu(a, e)} />
+                  <ErrorBoundary key={a.id} label={a.name}>
+                    <AccountCard
+                      account={a} now={now} delay={i * 80} onRemove={setToRemove} onLogin={signInForUsage}
+                      onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)}
+                    />
+                  </ErrorBoundary>
                 ))}
               </div>
               {visible.length === 0 && (
@@ -207,9 +287,9 @@ export default function App() {
                 </div>
               )}
 
-              <LimitTable accounts={visible} now={now} />
+              <ErrorBoundary label="Limit monitor"><LimitTable accounts={visible} now={now} /></ErrorBoundary>
 
-              <DailyUsage />
+              <ErrorBoundary label="Daily usage"><DailyUsage /></ErrorBoundary>
             </div>
           )}
 
@@ -220,47 +300,28 @@ export default function App() {
         </main>
       </div>
 
-      <AddAccountDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => void refresh(true)} />
+      <AddAccountDialog open={addOpen} onClose={closeAdd} onAdded={onAdded} />
       {contextAccount && (
-        <div
-          role="menu"
-          aria-label={`${contextAccount.account.name} account actions`}
-          className="fixed z-50 w-64 rounded-xl border border-line bg-card p-3 text-sm shadow-2xl"
-          style={{ left: Math.max(8, Math.min(contextAccount.x, window.innerWidth - 272)), top: Math.max(8, Math.min(contextAccount.y, window.innerHeight - 290)) }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="font-medium">{contextAccount.account.name}</div>
-          <p className="mt-1 text-xs text-muted-fg">Claude Desktop login is separate. Open its profile menu, log out, then sign in to this account.</p>
-          {accounts.some((account) => account.id === 'personal') && contextAccount.account.id !== 'personal' && (
-            <>
-              <button role="menuitem" className="mt-3 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncChats(contextAccount.account)}>
-                Share Personal CLI chats with {contextAccount.account.name}
-              </button>
-              <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncDesktop()}>
-                Sync local Desktop chats across profiles
-              </button>
-              <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncLabels()}>
-                Sync Desktop chat names and groups
-              </button>
-              {contextAccount.account.id === 'work' && (
-                <>
-                  <button role="menuitem" className="mt-2 w-full rounded-lg bg-frame px-3 py-2 text-left text-xs hover:bg-accent/20" onClick={() => void syncPlugins()}>
-                    Copy local Code plugins and skills to Work
-                  </button>
-                </>
-              )}
-            </>
-          )}
-        </div>
+        <AccountMenu
+          account={contextAccount.account}
+          x={contextAccount.x}
+          y={contextAccount.y}
+          actions={menuActions(contextAccount.account)}
+          emptyHint="Add a second account to share chats or sync Desktop data between accounts."
+          onClose={closeContext}
+        />
       )}
 
-      <Modal open={!!toRemove} onClose={() => setToRemove(null)} title="Remove account?">
+      <Modal open={!!toRemove} onClose={closeRemove} title="Remove account?">
         <p className="text-sm text-muted-fg">
           “{toRemove?.name}” will disappear from this dashboard and its saved history stops growing. Its login and files are not touched.
         </p>
+        {removeError && <p role="alert" className="mt-3 text-[13px] text-bad">{removeError}</p>}
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setToRemove(null)} className="rounded-lg border border-line px-3.5 py-2 text-sm transition-colors hover:bg-frame">Cancel</button>
-          <button onClick={() => void confirmRemove()} className="rounded-lg bg-bad px-3.5 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">Remove</button>
+          <button onClick={closeRemove} className="rounded-lg border border-line px-3.5 py-2 text-sm transition-colors hover:bg-frame">Cancel</button>
+          <button disabled={removing} onClick={() => void confirmRemove()} className="rounded-lg bg-bad px-3.5 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
+            {removing ? 'Removing…' : 'Remove'}
+          </button>
         </div>
       </Modal>
     </div>

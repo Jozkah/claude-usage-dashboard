@@ -27,8 +27,8 @@ export function Ring({ used, elapsed, size = 132, stale = false }: Props) {
   const half = size / 2;
 
   return (
-    <div className="relative mx-auto" style={{ width: size, height: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90">
+    <div className="relative mx-auto w-full" style={{ maxWidth: size, aspectRatio: '1 / 1' }}>
+      <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" aria-hidden>
         <circle cx={half} cy={half} r={r} fill="none" strokeWidth={stroke} style={{ stroke: 'var(--line)' }} />
         <circle
           cx={half} cy={half} r={r} fill="none" strokeWidth={stroke} strokeLinecap="round"

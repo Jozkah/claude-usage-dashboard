@@ -1,4 +1,4 @@
-import { LayoutGrid, Plus, Search } from 'lucide-react';
+import { LayoutGrid, Plus, Search, X } from 'lucide-react';
 import type { Account } from '../lib/types';
 import { colorVar, fmtAgo, headroom, levelFor } from '../lib/format';
 import { Chip } from './Chip';
@@ -15,7 +15,7 @@ interface Props {
   mock: boolean;
 }
 
-export function Logo({ className = 'size-7' }: { className?: string }) {
+function Logo({ className = 'size-7' }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden>
       <rect width="32" height="32" rx="9" fill="var(--primary)" />
@@ -36,6 +36,10 @@ const item = (active: boolean) =>
 export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch, lastLoad, now, mock }: Props) {
   const q = search.trim().toLowerCase();
   const list = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)) : accounts;
+  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && list[0]) { e.preventDefault(); onSelect(list[0].id); }
+    else if (e.key === 'Escape') { onSearch(''); e.currentTarget.blur(); }
+  };
 
   return (
     <div className="flex h-full w-full flex-col gap-4 bg-bg/80 p-3 backdrop-blur-xl">
@@ -51,15 +55,20 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
           data-account-search
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Find account"
+          onKeyDown={onSearchKey}
+          placeholder="Find account (Ctrl K)"
+          aria-label="Find account"
           className="w-full bg-transparent text-fg outline-none placeholder:text-muted-fg"
         />
+        {search && (
+          <button type="button" onClick={() => onSearch('')} aria-label="Clear search" className="rounded p-0.5 hover:text-fg"><X className="size-3.5" /></button>
+        )}
       </label>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
         <div>
           <div className="px-2 pb-1.5 text-[11px] font-medium tracking-wide text-subtle-fg uppercase">Main</div>
-          <button className={item(selected === 'all')} onClick={() => onSelect('all')}>
+          <button className={item(selected === 'all')} aria-current={selected === 'all' ? 'page' : undefined} onClick={() => onSelect('all')}>
             <LayoutGrid className="size-4" /> Overview
             <span className="ml-auto text-xs text-subtle-fg">{accounts.length}</span>
           </button>
@@ -72,7 +81,7 @@ export function Sidebar({ accounts, selected, onSelect, onAdd, search, onSearch,
               const ok = a.status === 'ok' && a.windows?.length;
               const left = ok ? headroom(a) : null;
               return (
-                <button key={a.id} className={`${item(selected === a.id)} animate-fade`} style={{ animationDelay: `${i * 50}ms` }} onClick={() => onSelect(a.id)}>
+                <button key={a.id} aria-current={selected === a.id ? 'page' : undefined} className={`${item(selected === a.id)} animate-fade`} style={{ animationDelay: `${i * 50}ms` }} onClick={() => onSelect(a.id)}>
                   <span
                     className="size-2 shrink-0 rounded-full"
                     style={{ background: ok ? colorVar(levelFor(100 - (left ?? 0))) : 'var(--warn)' }}

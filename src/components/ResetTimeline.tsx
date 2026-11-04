@@ -6,20 +6,22 @@ import { accountReset } from '../lib/reset';
 import { FrameCard } from './FrameCard';
 
 export function ResetTimeline({ accounts, now }: { accounts: Account[]; now: number }) {
+  const nowBucket = Math.floor(now / 30000);
   const items = useMemo(() => {
     const out: { id: string; account: string; label: string; at: number | null; used: number; five: boolean; estimated: boolean }[] = [];
     for (const a of accounts) {
-      let found = false;
       for (const w of a.windows ?? []) {
         const reset = accountReset(a, w, now);
-        if (!reset) continue;
-        found = true;
-        out.push({ id: a.id + w.key, account: a.name, label: w.label, at: reset.at, used: w.used, five: w.key === 'five_hour', estimated: reset.estimated });
+        const five = w.key === 'five_hour';
+        // a window without a usable reset still gets a row, so a missing limit is visible
+        out.push(reset
+          ? { id: `${a.id}:${w.key}`, account: a.name, label: w.label, at: reset.at, used: w.used, five, estimated: reset.estimated }
+          : { id: `${a.id}:${w.key}`, account: a.name, label: `${w.label} · reset unavailable`, at: null, used: w.used, five, estimated: false });
       }
-      if (!found) out.push({ id: a.id, account: a.name, label: 'Reset time unavailable', at: null, used: 0, five: false, estimated: false });
+      if (!a.windows?.length) out.push({ id: a.id, account: a.name, label: 'Reset time unavailable', at: null, used: 0, five: false, estimated: false });
     }
     return out.sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity));
-  }, [accounts, Math.floor(now / 30000)]);
+  }, [accounts, nowBucket]);
 
   return (
     <FrameCard icon={<CalendarClock className="size-3.5 text-subtle-fg" />} title="Upcoming resets" delay={90} className="h-full">

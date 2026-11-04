@@ -9,8 +9,6 @@ export interface ChatSession {
   id: string;
   name: string | null;
   folder: string | null;
-  where: string | null;
-  startedAt: number | null;
   lastActiveAt: number;
   working: boolean;
   state?: 'busy' | 'waiting';
@@ -31,7 +29,6 @@ export interface Account {
   message?: string;
   windows?: UsageWindow[];
   sessions?: ChatSession[];
-  raw?: unknown;
   stale?: boolean;
   staleMessage?: string;
 }
@@ -45,3 +42,28 @@ export interface UsageResponse {
 export type Point = [number, number];
 export type RangeKey = '6h' | '24h' | '7d';
 export type Level = 'good' | 'warn' | 'bad';
+
+export interface NamedShare { name: string; tokens: number; cost: number }
+export interface DayUsage {
+  date: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+  cost: number;
+  unpriced: number;
+  models: NamedShare[];
+  projects: NamedShare[];
+}
+export interface TokenReport {
+  scanning: boolean;
+  ready: boolean;
+  done: number;
+  total: number;
+  updatedAt: number;
+  days: DayUsage[];
+  /** Optional: the server's current calendar day (YYYY-MM-DD) and zone, when it reports them. */
+  today?: string;
+  timeZone?: string;
+}
