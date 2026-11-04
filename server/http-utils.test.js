@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { normalizeHost, parseAllowedHosts, hostAllowed, originAllowed, tokenOk, parseJsonText, readBody, resolveStaticPath, writeFileAtomic, createInflight, HttpError } from './http-utils.js';
+import { normalizeHost, parseAllowedHosts, hostAllowed, originAllowed, tokenOk, parseJsonText, readBody, resolveStaticPath, writeFileAtomic, createInflight, guardMutation, HttpError } from './http-utils.js';
 
 test('hosts are case-insensitive and ignore ports', () => {
   const allowed = parseAllowedHosts('MyPC, dash.lan:4777');
@@ -77,4 +77,21 @@ test('inflight shares one promise per key', async () => {
   assert.equal(a, 1); assert.equal(b, 1);
   await run('k', job);
   assert.equal(calls, 2);
+});
+
+test('tokenOk accepts Authorization: Bearer', () => {
+  assert.ok(tokenOk({ authorization: 'Bearer abc' }, 'abc'));
+  assert.ok(!tokenOk({ authorization: 'Bearer nope' }, 'abc'));
+});
+
+test('guardMutation: origin, token, content type', () => {
+  const h = { host: 'localhost:4777' };
+  assert.equal(guardMutation(h), null);
+  assert.equal(guardMutation({ ...h, 'sec-fetch-site': 'cross-site' }).status, 403);
+  assert.equal(guardMutation({ ...h, origin: 'http://evil.example' }).status, 403);
+  assert.equal(guardMutation({ ...h, 'content-length': '2', 'content-type': 'text/plain' }).status, 415);
+  assert.equal(guardMutation({ ...h, 'content-length': '2', 'content-type': 'application/json; charset=utf-8' }), null);
+  assert.equal(guardMutation(h, { allowAnyHost: true }).status, 403);
+  assert.equal(guardMutation(h, { token: 'x' }).status, 403);
+  assert.equal(guardMutation({ ...h, authorization: 'Bearer x' }, { token: 'x', allowAnyHost: true }), null);
 });

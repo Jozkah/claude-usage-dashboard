@@ -65,10 +65,32 @@ function cookieValue(header, name) {
 /** True when no token is configured or the request presents it (header or cookie). */
 export function tokenOk(headers, token) {
   if (!token) return true;
-  const given = String(headers['x-dashboard-token'] || cookieValue(headers.cookie, 'dashboard_token') || '');
+  const bearer = /^Bearer\s+(.+)$/i.exec(String(headers.authorization || ''));
+  const given = String(headers['x-dashboard-token'] || (bearer && bearer[1].trim()) || cookieValue(headers.cookie, 'dashboard_token') || '');
   const a = crypto.createHash('sha256').update(given).digest();
   const b = crypto.createHash('sha256').update(token).digest();
   return crypto.timingSafeEqual(a, b);
+}
+
+/** True when the request carries a body (Content-Length > 0 or chunked). */
+export function hasBody(headers) {
+  const len = Number(headers['content-length']);
+  return (Number.isFinite(len) && len > 0) || Boolean(headers['transfer-encoding']);
+}
+
+/**
+ * Guard for mutating routes. Returns null when allowed, else { status, error }.
+ * 403: ALLOW_ANY_HOST without a token, cross-site/Origin mismatch, or bad token
+ *      (token = x-dashboard-token header, Authorization: Bearer, or the cookie from /?token=...).
+ * 415: a body is present but Content-Type is not application/json (bodiless requests are fine).
+ */
+export function guardMutation(headers, { token = '', allowAnyHost = false } = {}) {
+  if (allowAnyHost && !token) return { status: 403, error: 'Forbidden' };
+  if (!originAllowed(headers) || !tokenOk(headers, token)) return { status: 403, error: 'Forbidden' };
+  if (hasBody(headers) && !/^application\/json\s*(;|$)/i.test(String(headers['content-type'] || ''))) {
+    return { status: 415, error: 'Content-Type must be application/json.' };
+  }
+  return null;
 }
 
 export function readBody(req, limit = 10000) {
