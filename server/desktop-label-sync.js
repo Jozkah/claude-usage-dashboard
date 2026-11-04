@@ -49,7 +49,7 @@ async function buildSidebarOps(db, scope, groups, sections) {
   const owner = entries.get('ccd-sync-owner');
   const pending = entries.get('ccd-sync-pending:ccd/dframe-store');
   if (!storeRecord || !groupsRecord || !sectionsRecord || !owner || decode(owner.value) !== scope.split('/')[0]) {
-    throw new Error('Work sidebar store does not match its account scope.');
+    throw Object.assign(new Error('Work sidebar store does not match its account scope.'), { code: 'SCOPE_OWNER_MISMATCH' });
   }
   if (pending && decode(pending.value) !== scope) throw new Error('Another account has an unsent sidebar change.');
   const store = JSON.parse(decode(storeRecord.value));
@@ -92,7 +92,7 @@ async function buildSidebarOps(db, scope, groups, sections) {
 // Validates first, backs up only when a write is about to happen, and removes that
 // backup again if the write fails. `beforeCommit` runs after validation and may return a
 // rollback function that is called when the LevelDB batch fails.
-async function writeSidebarStore(profile, scope, groups, sections, { beforeCommit } = {}) {
+async function writeSidebarStore(profile, scope, groups, sections, { beforeCommit, stateDir } = {}) {
   const ClassicLevel = await loadClassicLevel();
   const root = path.join(profile, 'Local Storage', 'leveldb');
   const open = async () => {
@@ -105,7 +105,7 @@ async function writeSidebarStore(profile, scope, groups, sections, { beforeCommi
   try { ops = await buildSidebarOps(reader, scope, groups, sections); }
   finally { await reader.close(); }
 
-  const backup = createBackup(root, '', { keep: 3 });
+  const backup = createBackup(root, '', { keep: 3, stateDir });
   let rollback = null;
   try {
     rollback = (await beforeCommit?.()) || null;
@@ -124,28 +124,40 @@ function readConfig(configPath) {
   return JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^﻿/, ''));
 }
 
+// A profile can sign in several accounts, giving several sidebar scopes ("<account>/<org>").
+// Each scope is its own participant in the merge; its chats are the pointers in the session
+// folders of that account. With a single scope every session folder counts (legacy layout).
 function readProfile(profile) {
   const configPath = path.join(profile, 'claude_desktop_config.json');
   const config = readConfig(configPath);
   const prefs = config.preferences?.epitaxyPrefs;
   const sectionScopes = prefs?.['dframe-code-sections'];
   const scopeKeys = sectionScopes && typeof sectionScopes === 'object' ? Object.keys(sectionScopes) : [];
-  if (!prefs || scopeKeys.length !== 1) {
-    throw new Error(`Expected one Desktop sidebar scope in profile ${profile}, found ${scopeKeys.length}${scopeKeys.length ? ` (${scopeKeys.join(', ')})` : ''}.`);
+  if (!prefs || !scopeKeys.length) {
+    throw new Error(`No Desktop sidebar scope found in profile ${profile}; sign in to Claude Desktop with this profile first.`);
   }
-  const scope = scopeKeys[0];
-  const entry = sectionScopes[scope];
-  if (!entry || typeof entry !== 'object' || (entry.sections !== undefined && !Array.isArray(entry.sections))) {
-    throw new Error(`Desktop sidebar schema changed in profile ${profile}: "dframe-code-sections" scope has no sections list.`);
+  for (const scope of scopeKeys) {
+    const entry = sectionScopes[scope];
+    if (!entry || typeof entry !== 'object' || (entry.sections !== undefined && !Array.isArray(entry.sections))) {
+      throw new Error(`Desktop sidebar schema changed in profile ${profile}: "dframe-code-sections" scope ${scope} has no sections list.`);
+    }
+    entry.sections ||= [];
   }
-  entry.sections ||= [];
   const root = path.join(profile, 'claude-code-sessions');
-  const records = new Map();
+  const leaves = [];
   for (const account of fs.readdirSync(root, { withFileTypes: true })) {
     if (!account.isDirectory()) continue;
     for (const device of fs.readdirSync(path.join(root, account.name), { withFileTypes: true })) {
-      if (!device.isDirectory()) continue;
-      const leaf = path.join(root, account.name, device.name);
+      if (device.isDirectory()) leaves.push({ account: account.name.toLowerCase(), leaf: path.join(root, account.name, device.name) });
+    }
+  }
+  const scopes = scopeKeys.map((scope) => {
+    const owner = scope.split('/')[0].toLowerCase();
+    const mine = leaves.filter((item) => item.account === owner);
+    // One scope and no folder named after it: fall back to every folder, as before.
+    const used = mine.length || scopeKeys.length > 1 ? mine : leaves;
+    const records = new Map();
+    for (const { leaf } of used) {
       for (const file of fs.readdirSync(leaf)) {
         if (!/^local_[0-9a-f-]+\.json$/i.test(file)) continue;
         const filename = path.join(leaf, file);
@@ -155,13 +167,22 @@ function readProfile(profile) {
         const ids = [...new Set([value.cliSessionId, value.sessionId].filter(Boolean))];
         if (!ids.length) continue;
         const mtime = fs.statSync(filename).mtimeMs;
-        // Same-named pointers in several folders of one profile: keep the most recently written.
+        // Same-named pointers in several folders of one account: keep the most recently written.
         const key = file.slice(0, -5);
         if (!records.has(key) || records.get(key).mtime < mtime) records.set(key, { filename, value, ids, mtime });
       }
     }
-  }
-  return { configPath, config, prefs, scope, records };
+    return { scope, records };
+  });
+  return { configPath, config, prefs, scopes };
+}
+
+// Flattens a profile into merge participants (one per sidebar scope).
+function participantsOf(id, profilePath, profile) {
+  return profile.scopes.map(({ scope, records }) => ({
+    id: profile.scopes.length > 1 ? `${id}#${scope}` : id, profileId: id, profilePath,
+    configPath: profile.configPath, config: profile.config, prefs: profile.prefs, scope, records, scopeCount: profile.scopes.length,
+  }));
 }
 
 function snapshotOf(profile) {
@@ -179,13 +200,17 @@ function snapshotOf(profile) {
   return { groups: groups.groups || [], assignments, order, manuals, known };
 }
 
+// With several sidebar scopes, the scope whose chats changed most recently is the active one.
 export function desktopLabelSnapshot(profilePath) {
-  const { known, ...snapshot } = snapshotOf(readProfile(profilePath));
+  const all = participantsOf('profile', profilePath, readProfile(profilePath));
+  const newest = (participant) => Math.max(0, ...[...participant.records.values()].map((record) => record.mtime));
+  const active = all.sort((a, b) => newest(b) - newest(a))[0];
+  const { known, ...snapshot } = snapshotOf(active);
   return snapshot;
 }
 
-function writeWithBackup(filename, value) {
-  const backup = createBackup(filename);
+function writeWithBackup(filename, value, stateDir) {
+  const backup = createBackup(filename, '', { stateDir });
   writeFileAtomic(filename, JSON.stringify(value, null, 2) + '\n');
   return backup;
 }
@@ -221,7 +246,7 @@ function syncDesktopTitles(profiles, targets = profiles, stateDir) {
       if (record.value.title === newest.value.title) continue;
       if (!targetFiles.has(record.filename)) { allUpdated = false; continue; }
       record.value.title = newest.value.title;
-      writeWithBackup(record.filename, record.value);
+      writeWithBackup(record.filename, record.value, stateDir);
       titles++;
     }
     // Only advance the baseline once every peer carries the title; otherwise a pending peer would look "renamed".
@@ -243,17 +268,20 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
   if (ids.length < 2 || targetIds.some((id) => !Object.hasOwn(profiles, id))) {
     throw new Error('Choose at least two Desktop profiles and valid target IDs.');
   }
-  const loaded = Object.fromEntries(ids.map((id) => [id, readProfile(profiles[id])]));
+  // One participant per profile, or per sidebar scope when a profile has several accounts.
+  const participants = ids.flatMap((id) => participantsOf(id, profiles[id], readProfile(profiles[id])));
+  const pids = participants.map((participant) => participant.id);
   const baselines = loadState(stateDir, 'label-baselines', {});
-  const baselineKey = [...ids].sort().join('|');
-  const merged = mergeDesktopLabelSnapshotsThreeWay(ids.map((id) => snapshotOf(loaded[id])),
-    { baseline: baselines[baselineKey] || null, ids });
-  const titles = syncDesktopTitles(Object.values(loaded), targetIds.map((id) => loaded[id]), stateDir);
+  const baselineKey = [...pids].sort().join('|');
+  const merged = mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
+    { baseline: baselines[baselineKey] || null, ids: pids });
+  const targets = participants.filter((participant) => targetIds.includes(participant.profileId));
+  const titles = syncDesktopTitles(participants, targets, stateDir);
   let updated = 0;
   const failures = [];
-  for (const id of targetIds) {
-    const profilePath = profiles[id];
-    const profile = loaded[id];
+  const skippedScopes = [];
+  for (const profile of targets) {
+    const { id, profilePath } = profile;
     const bySessionId = new Map();
     for (const [key, record] of profile.records) bySessionId.set(record.value.sessionId, key);
     const translate = (key) => {
@@ -284,13 +312,14 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
     try {
       // Config first (cheap to roll back), then LevelDB; the config is re-read right before it is written.
       await writeSidebarStore(profilePath, profile.scope, nextState, nonManuals, {
+        stateDir,
         beforeCommit: () => {
           const fresh = readConfig(profile.configPath);
           const freshPrefs = fresh.preferences.epitaxyPrefs;
           freshPrefs['dframe-group-scopes'] ||= {};
           freshPrefs['dframe-group-scopes'][profile.scope] = nextState;
           freshPrefs['dframe-code-sections'][profile.scope].sections = nonManuals;
-          const backup = writeWithBackup(profile.configPath, fresh);
+          const backup = writeWithBackup(profile.configPath, fresh, stateDir);
           return () => writeFileAtomic(profile.configPath, fs.readFileSync(backup));
         },
       });
@@ -298,15 +327,19 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
       profile.prefs['dframe-group-scopes'][profile.scope] = nextState;
       profile.prefs['dframe-code-sections'][profile.scope].sections = nonManuals;
       updated++;
-    } catch (error) { failures.push(`${id}: ${error.message}`); }
+    } catch (error) {
+      // Local Storage only tracks the signed-in account; other scopes of a multi-account profile are read-only.
+      if (error.code === 'SCOPE_OWNER_MISMATCH' && profile.scopeCount > 1) skippedScopes.push(id);
+      else failures.push(`${id}: ${error.message}`);
+    }
   }
   if (failures.length) throw new Error(failures.join('; '));
   // Remember what every profile now agrees on, so later runs can tell deletions from additions.
   if (targetIds.length === ids.length) {
-    baselines[baselineKey] = { profiles: ids, groups: merged.groups, assignments: merged.assignments,
+    baselines[baselineKey] = { profiles: pids, groups: merged.groups, assignments: merged.assignments,
       order: merged.order, manuals: merged.manuals };
     saveState(stateDir, 'label-baselines', baselines);
   }
-  return { titles, groups: merged.groups.length, assignments: merged.assignments.length, updated,
+  return { titles, groups: merged.groups.length, assignments: merged.assignments.length, updated, skippedScopes,
     conflicts: merged.conflicts };
 }

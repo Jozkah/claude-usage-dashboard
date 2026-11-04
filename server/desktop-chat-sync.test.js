@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { listBackups } from './sync-support.js';
 import { syncDesktopSessionRecords, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords, sessionLeaves, checkedOutBranch } from './desktop-chat-sync.js';
 
 // Keep sync state out of the real home folder.
@@ -44,7 +45,7 @@ test('respects minAgeMs and picks the active session folder among several', () =
     fs.mkdirSync(other, { recursive: true });
     fs.writeFileSync(path.join(other, 'local_old.json'), '{}');
     fs.utimesSync(path.join(other, 'local_old.json'), new Date(1000), new Date(1000));
-    fs.writeFileSync(path.join(w, 'local_new.json'), '{}');
+    fs.writeFileSync(path.join(w, 'local_ee.json'), '{}');
     assert.equal(sessionLeaves(work), w);
     assert.throws(() => sessionLeaves(path.join(root, 'nope')), /No local Desktop session folder/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -153,7 +154,7 @@ test('repairs newer full transcript pointer into closed Personal profile without
     assert.equal(repairStaleDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 1);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(p, name), 'utf8')), newer);
     assert.equal(repairStaleDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 0);
-    assert.equal(fs.readdirSync(p).filter((file) => file.startsWith(`${name}.backup-stale-`)).length, 1);
+    assert.equal(listBackups(path.join(p, name), 'stale').length, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -176,7 +177,7 @@ test('closed Work profile follows Personal archive state and newer turns', () =>
       { title: 'Same chat', isArchived: false, completedTurns: 5, lastActivityAt: 500,
         workOnly: 'kept', lastAssistantUuid: 'latest' });
     assert.equal(reconcileWorkSessionRecords(personal, work), 0);
-    assert.equal(fs.readdirSync(w).filter((file) => file.includes('.backup-reconcile-')).length, 1);
+    assert.equal(listBackups(path.join(w, name), 'reconcile').length, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -219,17 +220,17 @@ test('copies missing Desktop records both ways and preserves existing records', 
     fs.mkdirSync(w, { recursive: true });
     fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"personal"}');
     fs.writeFileSync(path.join(w, 'local_def.json'), '{"title":"work"}');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 1, toPersonal: 1, conflicts: 0 });
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 1, toPersonal: 1, conflicts: 0, deleted: 0 });
     assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), '{"title":"personal"}');
     assert.equal(fs.readFileSync(path.join(p, 'local_def.json'), 'utf8'), '{"title":"work"}');
     fs.writeFileSync(path.join(w, 'local_123abc.json'), '{"title":"new work session"}');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 1, conflicts: 0 });
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 1, conflicts: 0, deleted: 0 });
     assert.equal(fs.readFileSync(path.join(p, 'local_123abc.json'), 'utf8'), '{"title":"new work session"}');
     fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"changed"}');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1 });
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1, deleted: 0 });
     assert.equal(fs.readFileSync(path.join(w, 'local_abc.json'), 'utf8'), '{"title":"personal"}');
     fs.writeFileSync(path.join(p, 'local_bad.json'), '{"title":');
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1 });
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 1, deleted: 0 });
     assert.equal(fs.existsSync(path.join(w, 'local_bad.json')), false);
     assert.equal(fs.readdirSync(w).some((name) => name.startsWith('.sync-')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -246,7 +247,7 @@ test('live imported Desktop session is not duplicated by background sync', () =>
     fs.mkdirSync(w, { recursive: true });
     fs.writeFileSync(path.join(w, 'local_original.json'), JSON.stringify({ cliSessionId: 'abc-123' }));
     fs.writeFileSync(path.join(p, 'local_abc-123.json'), JSON.stringify({ cliSessionId: 'abc-123', adoptedFromOtherSurface: true }));
-    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 0 });
+    assert.deepEqual(syncDesktopSessionRecords(personal, work), { toWork: 0, toPersonal: 0, conflicts: 0, deleted: 0 });
     assert.deepEqual(fs.readdirSync(p), ['local_abc-123.json']);
     assert.deepEqual(fs.readdirSync(w), ['local_original.json']);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -271,7 +272,7 @@ test('repairs only clearly empty matching pointer after Desktop exits and keeps 
     assert.equal(repairEmptyDesktopSessionRecords(personal, work, { targetProfile: 'personal' }), 0);
     assert.equal(repairEmptyDesktopSessionRecords(personal, work, { targetProfile: 'work' }), 1);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')), full);
-    assert.equal(fs.readdirSync(w).filter((file) => file.startsWith(`${name}.backup-`)).length, 1);
+    assert.equal(listBackups(path.join(w, name)).length, 1);
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
     fs.writeFileSync(path.join(w, name), JSON.stringify({ ...empty, completedTurns: 1 }));
     assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
@@ -316,6 +317,131 @@ test('closed profile updates stale branch with backup, then leaves it stable', (
     assert.equal(alignDesktopSessionBranches(profile), 1);
     assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).branch, 'current-branch');
     assert.equal(alignDesktopSessionBranches(profile), 0);
-    assert.equal(fs.readdirSync(leaf).filter((name) => name.includes('.backup-branch-')).length, 1);
+    assert.equal(listBackups(file, 'branch').length, 1);
+    assert.equal(fs.readdirSync(leaf).filter((name) => name.includes('.backup-')).length, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+const trashed = () => {
+  try { return fs.readdirSync(path.join(stateDir, 'trash', 'chat-pointers')); } catch { return []; }
+};
+
+test('propagates a deletion to the other profile through the trash, once proven safe', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-delprop-');
+  const before = trashed().length;
+  try {
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"a"}');
+    fs.writeFileSync(path.join(p, 'local_dd.json'), '{"title":"k"}');
+    syncDesktopSessionRecords(personal, work); // copies both
+    syncDesktopSessionRecords(personal, work); // records the baseline
+    fs.rmSync(path.join(w, 'local_abc.json'));
+    const result = syncDesktopSessionRecords(personal, work);
+    assert.equal(result.deleted, 1);
+    assert.equal(fs.existsSync(path.join(p, 'local_abc.json')), false);
+    assert.equal(fs.existsSync(path.join(w, 'local_abc.json')), false);
+    assert.equal(fs.existsSync(path.join(p, 'local_dd.json')), true);
+    assert.equal(trashed().length, before + 1);
+    assert.equal(syncDesktopSessionRecords(personal, work).deleted, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('keeps a chat that changed after the other profile deleted it', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-delchanged-');
+  try {
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"a"}');
+    syncDesktopSessionRecords(personal, work);
+    syncDesktopSessionRecords(personal, work);
+    fs.rmSync(path.join(w, 'local_abc.json'));
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"a","completedTurns":3}');
+    assert.equal(syncDesktopSessionRecords(personal, work).deleted, 0);
+    assert.equal(fs.existsSync(path.join(p, 'local_abc.json')), true);
+    assert.equal(fs.existsSync(path.join(w, 'local_abc.json')), false); // and not copied back
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('never deletes without a baseline, when disabled, when too new, or on mass disappearance', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-delguard-');
+  try {
+    for (const id of ['a1', 'a2', 'a3', 'a4', 'a5']) fs.writeFileSync(path.join(p, `local_${id}.json`), `{"t":"${id}"}`);
+    syncDesktopSessionRecords(personal, work);
+    // Work is wiped right after the first run: no baseline from a previous tick yet for hashes of a stable layout.
+    for (const id of ['a1', 'a2', 'a3', 'a4', 'a5']) fs.rmSync(path.join(w, `local_${id}.json`));
+    assert.equal(syncDesktopSessionRecords(personal, work, { propagateDeletions: false }).deleted, 0);
+    assert.equal(syncDesktopSessionRecords(personal, work, { minAgeMs: 60000 }).deleted, 0);
+    assert.equal(syncDesktopSessionRecords(personal, work).deleted, 0); // 5 of 5 missing: mass guard
+    assert.equal(fs.readdirSync(p).filter((name) => name.startsWith('local_')).length, 5);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a changed session folder layout suspends deletion for that run', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-dellayout-');
+  try {
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"t":1}');
+    syncDesktopSessionRecords(personal, work);
+    syncDesktopSessionRecords(personal, work);
+    fs.rmSync(path.join(w, 'local_abc.json'));
+    // A newer account folder appears in Work, so the "active" leaf is now a different, empty one.
+    const other = path.join(work, 'claude-code-sessions', 'second-account', 'device');
+    fs.mkdirSync(other, { recursive: true });
+    fs.writeFileSync(path.join(other, 'local_ee.json'), '{}');
+    assert.equal(syncDesktopSessionRecords(personal, work).deleted, 0);
+    assert.equal(fs.existsSync(path.join(p, 'local_abc.json')), true);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('uses every active session folder of the signed-in accounts and reports no multi-folder error', () => {
+  const { root, personal, work, p } = twoProfiles('claude-desktop-multileaf-');
+  try {
+    // Work is signed in with two accounts; each has a session folder.
+    const second = path.join(work, 'claude-code-sessions', 'acct2', 'device');
+    fs.mkdirSync(second, { recursive: true });
+    fs.writeFileSync(path.join(work, 'claude_desktop_config.json'), JSON.stringify({ preferences: { epitaxyPrefs: {
+      'dframe-code-sections': { 'account/org': { sections: [] }, 'acct2/org': { sections: [] } } } } }));
+    fs.writeFileSync(path.join(second, 'local_a2.json'), '{"title":"two"}');
+    fs.writeFileSync(path.join(p, 'local_a1.json'), '{"title":"one"}');
+    const result = syncDesktopSessionRecords(personal, work);
+    assert.equal(result.toPersonal, 1); // the chat that lives in Work's second account folder
+    assert.equal(result.toWork, 1);
+    assert.equal(fs.existsSync(path.join(p, 'local_a2.json')), true);
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 0);
+    // An account that is no longer signed in is not synced.
+    const stale = path.join(work, 'claude-code-sessions', 'gone', 'device');
+    fs.mkdirSync(stale, { recursive: true });
+    fs.writeFileSync(path.join(stale, 'local_f9.json'), '{}');
+    assert.equal(syncDesktopSessionRecords(personal, work).toPersonal, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('repairs and branch alignment reach pointers in every active session folder', () => {
+  const { root, work } = twoProfiles('claude-desktop-multileaf-align-');
+  try {
+    const second = path.join(work, 'claude-code-sessions', 'acct2', 'device');
+    fs.mkdirSync(second, { recursive: true });
+    fs.writeFileSync(path.join(work, 'claude_desktop_config.json'), JSON.stringify({ preferences: { epitaxyPrefs: {
+      'dframe-code-sections': { 'account/org': { sections: [] }, 'acct2/org': { sections: [] } } } } }));
+    const repo = path.join(root, 'repo');
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.git', 'HEAD'), 'ref: refs/heads/current\n');
+    const file = path.join(second, 'local_aa.json');
+    fs.writeFileSync(file, JSON.stringify({ sessionId: 'local_aa', cliSessionId: 'cli', completedTurns: 2, worktreePath: repo, branch: 'old' }));
+    assert.equal(alignDesktopSessionBranches(work), 1);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).branch, 'current');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('backups go to the dedicated folder and only the newest are kept', () => {
+  const { root, p, personal } = twoProfiles('claude-desktop-backups-');
+  try {
+    const file = path.join(p, 'local_bb.json');
+    for (let i = 0; i < 8; i++) {
+      fs.writeFileSync(file, JSON.stringify({ sessionId: 'local_bb', cliSessionId: 'c', completedTurns: 1, worktreePath: path.join(root, 'repo'), branch: `b${i}` }));
+      const repo = path.join(root, 'repo');
+      fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+      fs.writeFileSync(path.join(repo, '.git', 'HEAD'), `ref: refs/heads/new${i}\n`);
+      assert.equal(alignDesktopSessionBranches(personal), 1);
+    }
+    assert.equal(listBackups(file, 'branch').length, 5);
+    assert.ok(listBackups(file, 'branch')[0].startsWith(path.join(stateDir, 'backups')));
+    assert.equal(fs.readdirSync(p).some((name) => name.includes('.backup-')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

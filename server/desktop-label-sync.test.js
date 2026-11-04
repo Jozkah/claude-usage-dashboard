@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClassicLevel } from 'classic-level';
+import { listBackups } from './sync-support.js';
 import { syncMergedDesktopLabels, syncMergedDesktopLabelsMany, desktopLabelSnapshot, desktopLabelSyncStatus,
   encodeLocalStorageValue, decodeLocalStorageValue } from './desktop-label-sync.js';
 
@@ -229,5 +230,33 @@ test('a rename survives a later newer file on another profile', async () => {
     await syncMergedDesktopLabels(personal, work, { stateDir });
     assert.equal(read(personal), 'Renamed');
     assert.equal(read(work), 'Renamed');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('profile with several sidebar scopes syncs the signed-in one and leaves the others alone', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-multiscope-'));
+  try {
+    const group = { id: 'g1', name: 'Group' };
+    const personal = await makeProfile(root, 'personal', { groups: [group], assignments: { 'code:local_a': 'g1' } });
+    const work = await makeProfile(root, 'work');
+    // Second, no longer signed-in account in the Work profile.
+    const configPath = path.join(work, 'claude_desktop_config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.preferences.epitaxyPrefs['dframe-group-scopes']['old/org'] = { groups: [], assignments: {}, order: {} };
+    config.preferences.epitaxyPrefs['dframe-code-sections']['old/org'] = { sections: [{ id: 'sessions', kind: 'sessions', order: 0 }] };
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const oldLeaf = path.join(work, 'claude-code-sessions', 'old', 'device');
+    fs.mkdirSync(oldLeaf, { recursive: true });
+    fs.writeFileSync(path.join(oldLeaf, 'local_z.json'), JSON.stringify({ sessionId: 'local_z', title: 'z' }));
+    assert.ok(desktopLabelSnapshot(work));
+    const result = await syncMergedDesktopLabels(personal, work, { targetProfile: 'work', stateDir });
+    assert.deepEqual(result.skippedScopes, ['work#old/org']);
+    assert.equal(result.updated, 1);
+    const saved = JSON.parse(fs.readFileSync(configPath, 'utf8')).preferences.epitaxyPrefs;
+    assert.equal(saved['dframe-group-scopes']['work-scope'].groups[0].name, 'Group');
+    assert.deepEqual(saved['dframe-group-scopes']['old/org'].groups, []);
+    // Backups go to the dedicated folder, not next to the config.
+    assert.equal(fs.readdirSync(work).some((name) => name.includes('.backup-')), false);
+    assert.ok(listBackups(configPath).length >= 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
