@@ -4,7 +4,103 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { syncDesktopSessionRecords, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
+import { syncDesktopSessionRecords, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, findWindowsDesktopProfiles, reconcileWorkSessionRecords, sessionLeaves, checkedOutBranch } from './desktop-chat-sync.js';
+
+// Keep sync state out of the real home folder.
+const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-sync-state-'));
+process.env.DASHBOARD_SYNC_STATE_DIR = stateDir;
+test.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+
+function twoProfiles(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const personal = path.join(root, 'personal');
+  const work = path.join(root, 'work');
+  const p = path.join(personal, 'claude-code-sessions', 'account', 'device');
+  const w = path.join(work, 'claude-code-sessions', 'account', 'device');
+  fs.mkdirSync(p, { recursive: true });
+  fs.mkdirSync(w, { recursive: true });
+  return { root, personal, work, p, w };
+}
+
+test('does not copy back a pointer deleted in one profile', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-deleted-');
+  try {
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{"title":"a"}');
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 1);
+    fs.rmSync(path.join(w, 'local_abc.json'));
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 0);
+    assert.equal(fs.existsSync(path.join(w, 'local_abc.json')), false);
+    fs.writeFileSync(path.join(p, 'local_def.json'), '{"title":"new"}');
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('respects minAgeMs and picks the active session folder among several', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-leaves-');
+  try {
+    fs.writeFileSync(path.join(p, 'local_abc.json'), '{}');
+    assert.equal(syncDesktopSessionRecords(personal, work, { minAgeMs: 60000 }).toWork, 0);
+    const other = path.join(work, 'claude-code-sessions', 'other-account', 'device');
+    fs.mkdirSync(other, { recursive: true });
+    fs.writeFileSync(path.join(other, 'local_old.json'), '{}');
+    fs.utimesSync(path.join(other, 'local_old.json'), new Date(1000), new Date(1000));
+    fs.writeFileSync(path.join(w, 'local_new.json'), '{}');
+    assert.equal(sessionLeaves(work), w);
+    assert.throws(() => sessionLeaves(path.join(root, 'nope')), /No local Desktop session folder/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('repair never overwrites when lastActivityAt is missing', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-nan-');
+  try {
+    const name = 'local_2de2d777-183f-45a9-abd7-e5a5b7d5a67b.json';
+    const id = name.slice(0, -5);
+    fs.writeFileSync(path.join(p, name), JSON.stringify({ sessionId: id,
+      cliSessionId: '26e615d1-a096-4913-ad43-707fa222f5eb', completedTurns: 4 }));
+    fs.writeFileSync(path.join(w, name), JSON.stringify({ sessionId: id, lastActivityAt: 100 }));
+    assert.equal(repairEmptyDesktopSessionRecords(personal, work), 0);
+    assert.equal(repairStaleDesktopSessionRecords(personal, work), 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconcile keeps going after a bad file and reports the error', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-isolate-');
+  try {
+    fs.writeFileSync(path.join(p, 'local_aaa.json'), '{"completedTurns":1}');
+    fs.mkdirSync(path.join(w, 'local_aaa.json')); // unreadable as a file (EISDIR)
+    fs.writeFileSync(path.join(p, 'local_bbb.json'), '{"isArchived":true}');
+    fs.writeFileSync(path.join(w, 'local_bbb.json'), '{"isArchived":false}');
+    const errors = [];
+    assert.equal(reconcileWorkSessionRecords(personal, work, { errors }), 1);
+    assert.equal(errors.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(w, 'local_bbb.json'), 'utf8')).isArchived, true);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reads the checked-out branch without git, including linked worktrees', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-head-'));
+  try {
+    const main = path.join(root, 'main');
+    fs.mkdirSync(path.join(main, '.git', 'worktrees', 'wt'), { recursive: true });
+    fs.writeFileSync(path.join(main, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    fs.writeFileSync(path.join(main, '.git', 'worktrees', 'wt', 'HEAD'), 'ref: refs/heads/feature/x\n');
+    const linked = path.join(root, 'linked', 'sub');
+    fs.mkdirSync(linked, { recursive: true });
+    fs.writeFileSync(path.join(root, 'linked', '.git'), `gitdir: ${path.join(main, '.git', 'worktrees', 'wt')}\n`);
+    assert.equal(checkedOutBranch(main), 'main');
+    assert.equal(checkedOutBranch(linked), 'feature/x');
+    fs.writeFileSync(path.join(main, '.git', 'HEAD'), '0123456789abcdef0123456789abcdef01234567\n');
+    assert.equal(checkedOutBranch(main), null);
+    assert.equal(checkedOutBranch(path.join(root, 'missing')), null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reports a clear error when the Packages folder is missing', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-no-packages-'));
+  try {
+    assert.throws(() => findWindowsDesktopProfiles(local), /packages folder not found/);
+  } finally { fs.rmSync(local, { recursive: true, force: true }); }
+});
 
 test('copies nested parent and child records across three profiles', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-three-profiles-'));

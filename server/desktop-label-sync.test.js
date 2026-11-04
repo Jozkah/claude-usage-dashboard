@@ -4,7 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClassicLevel } from 'classic-level';
-import { syncDesktopLabels, syncMergedDesktopLabels, syncMergedDesktopLabelsMany, desktopLabelFingerprint } from './desktop-label-sync.js';
+import { syncMergedDesktopLabels, syncMergedDesktopLabelsMany, desktopLabelSnapshot, desktopLabelSyncStatus,
+  encodeLocalStorageValue, decodeLocalStorageValue } from './desktop-label-sync.js';
+
+// Keep sync state out of the real home folder.
+const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-state-'));
+process.env.DASHBOARD_SYNC_STATE_DIR = stateDir;
+test.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+const desktopLabelFingerprint = (profile) => JSON.stringify(desktopLabelSnapshot(profile));
 
 test('merges independent Desktop categories into both closed profiles', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-merge-'));
@@ -58,7 +65,8 @@ test('merges independent Desktop categories into both closed profiles', async ()
     assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(work));
     const third = await setup('third', [{ id: 'third-project', name: 'Third project' }],
       { 'code:local_c': 'third-project' });
-    await assert.rejects(syncMergedDesktopLabelsMany({ personal, work, third }), /Conflicting group assignment/);
+    const conflicted = await syncMergedDesktopLabelsMany({ personal, work, third });
+    assert.deepEqual(conflicted.conflicts.map((conflict) => conflict.chat), ['code:local_c']);
     const thirdConfigPath = path.join(third, 'claude_desktop_config.json');
     const thirdConfig = JSON.parse(fs.readFileSync(thirdConfigPath, 'utf8'));
     const thirdState = thirdConfig.preferences.epitaxyPrefs['dframe-group-scopes']['third-scope'];
@@ -120,7 +128,8 @@ test('copies sidebar groups and chat titles into corresponding profile scope', a
     await db.close();
     const personalRecord = path.join(personal, 'claude-code-sessions', 'personal-scope', 'device', 'local_111.json');
     fs.utimesSync(personalRecord, new Date(Date.now() + 1000), new Date(Date.now() + 1000));
-    assert.deepEqual(await syncDesktopLabels(personal, work), { titles: 1, groups: 1, assignments: 1 });
+    const first = await syncMergedDesktopLabels(personal, work, { targetProfile: 'work' });
+    assert.deepEqual([first.titles, first.groups, first.assignments, first.updated], [1, 1, 1, 1]);
     const config = JSON.parse(fs.readFileSync(path.join(work, 'claude_desktop_config.json')));
     const prefs = config.preferences.epitaxyPrefs;
     assert.equal(prefs['dframe-group-scopes']['work-scope'].groups[0].name, 'Project');
@@ -138,6 +147,87 @@ test('copies sidebar groups and chat titles into corresponding profile scope', a
     assert.equal(await get('ccd-sync-pending:ccd/dframe-store'), 'work-scope');
     await saved.close();
     assert.equal(desktopLabelFingerprint(personal), desktopLabelFingerprint(work));
-    assert.deepEqual(await syncDesktopLabels(personal, work), { titles: 0, groups: 0, assignments: 0 });
+    const second = await syncMergedDesktopLabels(personal, work, { targetProfile: 'work' });
+    assert.deepEqual([second.titles, second.updated], [0, 0]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+async function makeProfile(root, name, { owner = `${name}-scope`, chats = ['a'], groups = [], assignments = {}, withDb = true, sectionsEntry } = {}) {
+  const prefix = Buffer.from('_https://claude.ai\0', 'latin1');
+  const profile = path.join(root, name);
+  const scope = `${name}-scope`;
+  const leaf = path.join(profile, 'claude-code-sessions', scope, 'device');
+  fs.mkdirSync(leaf, { recursive: true });
+  for (const id of chats) fs.writeFileSync(path.join(leaf, `local_${id}.json`), JSON.stringify({ sessionId: `local_${id}`, title: id }));
+  const state = { groups, assignments, order: {} };
+  const sections = [{ id: 'sessions', kind: 'sessions', order: 0 }];
+  fs.writeFileSync(path.join(profile, 'claude_desktop_config.json'), JSON.stringify({ preferences: { epitaxyPrefs: {
+    'dframe-group-scopes': { [scope]: state },
+    'dframe-code-sections': { [scope]: sectionsEntry ?? { sections } } } } }));
+  if (withDb) {
+    const db = new ClassicLevel(path.join(profile, 'Local Storage', 'leveldb'), { keyEncoding: 'buffer', valueEncoding: 'buffer' });
+    await db.open();
+    const put = (key, value) => db.put(Buffer.concat([prefix, Buffer.from([1, ...Buffer.from(key)])]),
+      Buffer.concat([Buffer.from([1]), Buffer.from(typeof value === 'string' ? value : JSON.stringify(value))]));
+    await put('ccd-sync-owner', owner);
+    await put('dframe-store', { version: 1, state: { customGroupsByScope: { [scope]: state }, codeSidebarByScope: { [scope]: { sections } } } });
+    await put('LSS-persisted.dframe-group-scopes', { value: { [scope]: state }, timestamp: 0 });
+    await put('LSS-persisted.dframe-code-sections', { value: { [scope]: { sections } }, timestamp: 0 });
+    await db.close();
+  }
+  return profile;
+}
+
+test('encodes non-Latin-1 text and emoji round trip', () => {
+  for (const text of ['plain', 'café', '你好', 'rocket 🚀']) {
+    assert.equal(decodeLocalStorageValue(encodeLocalStorageValue(text)), text);
+  }
+});
+
+test('label sync reports availability of the optional classic-level package', async () => {
+  assert.deepEqual(await desktopLabelSyncStatus(), { available: true });
+});
+
+test('failed validation leaves no LevelDB backup and no config change', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-validate-'));
+  try {
+    const personal = await makeProfile(root, 'personal', { groups: [{ id: 'g', name: 'G' }], assignments: { 'code:local_a': 'g' } });
+    const work = await makeProfile(root, 'work', { owner: 'someone-else' });
+    const configPath = path.join(work, 'claude_desktop_config.json');
+    const before = fs.readFileSync(configPath, 'utf8');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await assert.rejects(syncMergedDesktopLabels(personal, work, { targetProfile: 'work', stateDir }), /does not match its account scope/);
+    }
+    assert.equal(fs.readFileSync(configPath, 'utf8'), before);
+    assert.deepEqual(fs.readdirSync(path.join(work, 'Local Storage')).filter((name) => name.includes('backup')), []);
+    assert.deepEqual(fs.readdirSync(work).filter((name) => name.includes('backup')), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('profiles without a sections list do not crash the snapshot', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-nosections-'));
+  try {
+    const profile = await makeProfile(root, 'personal', { withDb: false, sectionsEntry: {} });
+    assert.deepEqual(desktopLabelSnapshot(profile).manuals, []);
+    const bad = await makeProfile(root, 'work', { withDb: false, sectionsEntry: { sections: 'nope' } });
+    assert.throws(() => desktopLabelSnapshot(bad), /schema changed/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a rename survives a later newer file on another profile', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-label-title-'));
+  try {
+    const personal = await makeProfile(root, 'personal');
+    const work = await makeProfile(root, 'work');
+    const file = (profile) => path.join(profile, 'claude-code-sessions', `${path.basename(profile)}-scope`, 'device', 'local_a.json');
+    const read = (profile) => JSON.parse(fs.readFileSync(file(profile), 'utf8')).title;
+    await syncMergedDesktopLabels(personal, work, { stateDir });
+    const workRecord = JSON.parse(fs.readFileSync(file(work), 'utf8'));
+    fs.writeFileSync(file(work), JSON.stringify({ ...workRecord, title: 'Renamed' }));
+    fs.utimesSync(file(work), new Date('2030-01-01'), new Date('2030-01-01'));
+    fs.utimesSync(file(personal), new Date('2031-01-01'), new Date('2031-01-01')); // personal touched later, title untouched
+    await syncMergedDesktopLabels(personal, work, { stateDir });
+    assert.equal(read(personal), 'Renamed');
+    assert.equal(read(work), 'Renamed');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

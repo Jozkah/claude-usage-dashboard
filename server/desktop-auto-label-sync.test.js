@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseAutomaticLabelSource, chooseInitialLabelSource, mergeDesktopLabelSnapshots } from './desktop-auto-label-sync.js';
+import { mergeDesktopLabelSnapshots, mergeDesktopLabelSnapshotsThreeWay } from './desktop-auto-label-sync.js';
 
 test('merges independently added groups and assignments without duplicating same-name groups', () => {
   const personal = { groups: [{ id: 'p-trip', name: 'viagens' }],
@@ -38,26 +38,60 @@ test('merges third profile without losing nested chat order', () => {
   assert.deepEqual(merged.manuals[0].members, ['code:parent', 'code:child', 'code:third']);
 });
 
-test('initializes only from matching profiles', () => {
-  assert.equal(chooseAutomaticLabelSource({ personal: 'a', work: 'a' }, null), 'personal');
-  assert.equal(chooseAutomaticLabelSource({ personal: 'a', work: 'b' }, null), null);
+const snap = (groups, assignments, extra = {}) => ({ groups, assignments, order: [], manuals: [], ...extra });
+
+test('reports conflicts instead of aborting the three-way merge', () => {
+  const a = snap([{ id: 'a', name: 'A' }], [['code:x', 'a'], ['code:y', 'a']]);
+  const b = snap([{ id: 'b', name: 'B' }], [['code:x', 'b']]);
+  const merged = mergeDesktopLabelSnapshotsThreeWay([a, b]);
+  assert.deepEqual(merged.conflicts, [{ chat: 'code:x', groups: ['a', 'b'] }]);
+  assert.deepEqual(merged.assignments, [['code:x', 'a'], ['code:y', 'a']]);
 });
 
-test('follows sole changed profile, including deletions', () => {
-  const baseline = { personal: 'a', work: 'a' };
-  assert.equal(chooseAutomaticLabelSource({ personal: 'b', work: 'a' }, baseline), 'personal');
-  assert.equal(chooseAutomaticLabelSource({ personal: 'a', work: 'b' }, baseline), 'work');
+test('propagates deleted groups and removed assignments using the baseline', () => {
+  const baseline = { profiles: ['p', 'w'], groups: [{ id: 'g1', name: 'One' }, { id: 'g2', name: 'Two' }],
+    assignments: [['code:a', 'g1'], ['code:b', 'g1'], ['code:c', 'g2']], order: [], manuals: [] };
+  const personal = snap([{ id: 'g1', name: 'One' }], [['code:a', 'g1'], ['code:b', 'g1']],
+    { known: ['code:a', 'code:b', 'code:c'] });
+  const work = snap([{ id: 'g1', name: 'One' }, { id: 'g2', name: 'Two' }],
+    [['code:a', 'g1'], ['code:c', 'g2']], { known: ['code:a', 'code:b', 'code:c'] });
+  const merged = mergeDesktopLabelSnapshotsThreeWay([personal, work], { baseline, ids: ['p', 'w'] });
+  assert.deepEqual(merged.groups.map((group) => group.id), ['g1']);
+  assert.deepEqual(merged.assignments, [['code:a', 'g1']]);
+  assert.deepEqual(merged.conflicts, []);
 });
 
-test('refuses simultaneous changes', () => {
-  assert.equal(chooseAutomaticLabelSource({ personal: 'b', work: 'c' },
-    { personal: 'a', work: 'a' }), null);
+test('does not treat a chat unknown to a profile as removed there', () => {
+  const baseline = { profiles: ['p', 'w'], groups: [{ id: 'g1', name: 'One' }],
+    assignments: [['code:a', 'g1'], ['code:b', 'g1']], order: [], manuals: [] };
+  const personal = snap([{ id: 'g1', name: 'One' }], [['code:a', 'g1'], ['code:b', 'g1']], { known: ['code:a', 'code:b'] });
+  const work = snap([{ id: 'g1', name: 'One' }], [['code:a', 'g1']], { known: ['code:a'] });
+  const merged = mergeDesktopLabelSnapshotsThreeWay([personal, work], { baseline, ids: ['p', 'w'] });
+  assert.deepEqual(merged.assignments, [['code:a', 'g1'], ['code:b', 'g1']]);
 });
 
-test('initial sync accepts only consistent superset', () => {
-  const personal = { groups: [{ id: 'g' }], manuals: [], assignments: [['a', 'g']], order: [['g', ['a']]] };
-  const work = { groups: [{ id: 'g' }], manuals: [], assignments: [['a', 'g'], ['b', 'g']], order: [['g', ['a', 'b']]] };
-  assert.equal(chooseInitialLabelSource(personal, work), 'work');
-  assert.equal(chooseInitialLabelSource(work, personal), 'personal');
-  assert.equal(chooseInitialLabelSource(personal, { ...work, assignments: [['a', 'other']] }), null);
+test('propagates a renamed group without duplicating it', () => {
+  const baseline = { profiles: ['p', 'w'], groups: [{ id: 'g1', name: 'Old' }],
+    assignments: [['code:a', 'g1']], order: [], manuals: [{ id: 'g1', name: 'Old', members: [] }] };
+  const personal = snap([{ id: 'g1', name: 'New' }], [['code:a', 'g1']],
+    { manuals: [{ id: 'g1', name: 'New', members: [] }] });
+  const work = snap([{ id: 'g1', name: 'Old' }], [['code:a', 'g1']],
+    { manuals: [{ id: 'g1', name: 'Old', members: [] }] });
+  const merged = mergeDesktopLabelSnapshotsThreeWay([work, personal], { baseline, ids: ['w', 'p'] });
+  assert.deepEqual(merged.groups, [{ id: 'g1', name: 'New' }]);
+  assert.equal(merged.manuals[0].name, 'New');
+});
+
+test('a profile outside the baseline never deletes anything', () => {
+  const baseline = { profiles: ['p'], groups: [{ id: 'g1', name: 'One' }], assignments: [['code:a', 'g1']], order: [], manuals: [] };
+  const personal = snap([{ id: 'g1', name: 'One' }], [['code:a', 'g1']]);
+  const fresh = snap([], []);
+  const merged = mergeDesktopLabelSnapshotsThreeWay([personal, fresh], { baseline, ids: ['p', 'new'] });
+  assert.deepEqual(merged.groups.map((group) => group.id), ['g1']);
+});
+
+test('keeps two groups with equal names inside one snapshot from crashing', () => {
+  const merged = mergeDesktopLabelSnapshots(snap([{ id: 'a', name: 'Dup' }, { id: 'b', name: 'Dup' }], [['code:x', 'b']]));
+  assert.equal(merged.groups.length, 1);
+  assert.deepEqual(merged.assignments, [['code:x', 'a']]);
 });

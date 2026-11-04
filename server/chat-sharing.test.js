@@ -29,6 +29,35 @@ test('never replaces target chats', () => {
     const work = path.join(root, 'work');
     fs.mkdirSync(path.join(personal, 'projects'), { recursive: true });
     fs.mkdirSync(path.join(work, 'projects'), { recursive: true });
+    fs.writeFileSync(path.join(work, 'projects', 'mine.jsonl'), 'x');
     assert.throws(() => shareLocalChats(personal, work), /Existing chats were left untouched/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('replaces an empty target projects folder, rejects bad folders', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-chat-share-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    fs.mkdirSync(path.join(personal, 'projects'), { recursive: true });
+    fs.mkdirSync(path.join(work, 'projects'), { recursive: true });
+    assert.deepEqual(shareLocalChats(personal, work), { alreadyShared: false });
+    assert.throws(() => shareLocalChats(personal, path.join(root, 'missing')), /does not exist/);
+    assert.throws(() => shareLocalChats(path.join(root, 'missing'), work), /no local Claude Code chats/);
+    assert.throws(() => shareLocalChats(personal, personal), /two different/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reports a dangling projects link clearly', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-chat-share-'));
+  try {
+    const personal = path.join(root, 'personal');
+    const work = path.join(root, 'work');
+    fs.mkdirSync(path.join(personal, 'projects'), { recursive: true });
+    fs.mkdirSync(path.join(work, 'gone'), { recursive: true });
+    fs.mkdirSync(work, { recursive: true });
+    try { fs.symlinkSync(path.join(work, 'gone'), path.join(work, 'projects'), 'junction'); } catch { return; }
+    fs.rmSync(path.join(work, 'gone'), { recursive: true });
+    assert.throws(() => shareLocalChats(personal, work), /broken link/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
