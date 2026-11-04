@@ -1,4 +1,5 @@
 import { ProviderIcon, providerOf } from './ProviderIcon';
+import { planClasses } from '../lib/plan';
 import { EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { useState } from 'react';
@@ -129,7 +130,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   );
   const right = (
     <div className="flex items-center gap-2">
-      {a.plan && <Chip tone="accent">{a.plan}</Chip>}
+      {a.plan && <Chip className={planClasses(a.plan)}>{a.plan}</Chip>}
       {!a.plan && a.planUnknown && <span title="Plan not detected yet, so some limits may be missing until the next live reading"><Chip tone="mute">Plan unknown</Chip></span>}
       {onMenu && (
         <button

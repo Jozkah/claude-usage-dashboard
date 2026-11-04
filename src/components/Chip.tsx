@@ -11,7 +11,7 @@ const tones: Record<Level | 'mute' | 'accent', string> = {
 
 export function Chip({ tone = 'mute', children, className = '' }: { tone?: Level | 'mute' | 'accent'; children: ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap ${tones[tone]} ${className}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap ${className.includes('bg-') ? '' : tones[tone]} ${className}`}>
       {children}
     </span>
   );

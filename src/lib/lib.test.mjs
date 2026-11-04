@@ -134,3 +134,16 @@ test('isIdle only for readable accounts with zero usage and no chat running', ()
   assert.equal(isIdle({ ...idle, status: 'expired' }), false);
   assert.equal(isIdle({ status: 'ok', windows: [] }), false);
 });
+
+import { planTier } from './plan.ts';
+test('planTier maps Claude and Codex plan names to colour tiers', () => {
+  assert.equal(planTier('Max 20x'), 'max20');
+  assert.equal(planTier('Max 5x'), 'max5');
+  assert.equal(planTier('Team'), 'team');
+  assert.equal(planTier('Pro'), 'pro');
+  assert.equal(planTier('Codex Plus'), 'plus');
+  assert.equal(planTier('Codex Pro'), 'pro');
+  assert.equal(planTier('Enterprise'), 'business');
+  assert.equal(planTier(null), 'unknown');
+  assert.equal(planTier('Mystery'), 'unknown');
+});
