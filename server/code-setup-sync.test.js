@@ -66,12 +66,12 @@ test('accepts a BOM, backs up changed files and reports per-category counts', ()
     fs.writeFileSync(path.join(personal, 'plugins', 'known_marketplaces.json'),
       JSON.stringify({ market: { installLocation: path.join(personal, 'plugins', 'marketplaces', 'market') } }));
     const result = syncCodeSetup(personal, work);
-    assert.deepEqual(result, { plugins: 0, marketplaces: 1, skills: 0, settings: 1 });
+    assert.deepEqual(result, { plugins: 0, marketplaces: 1, skills: 0, commands: 0, agents: 0, settings: 1 });
     const known = JSON.parse(fs.readFileSync(path.join(work, 'plugins', 'known_marketplaces.json'), 'utf8'));
     assert.equal(known.market.installLocation, path.join(work, 'plugins', 'marketplaces', 'market'));
     assert.equal(listBackups(path.join(work, 'settings.json'), 'setup').length, 1);
     assert.equal(fs.readdirSync(work).some((name) => name.includes('.backup-')), false);
-    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 0, marketplaces: 0, skills: 0, settings: 0 });
+    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 0, marketplaces: 0, skills: 0, commands: 0, agents: 0, settings: 0 });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -103,9 +103,9 @@ test('a failure part-way removes everything copied and keeps the previous index 
     assert.deepEqual(fs.readdirSync(path.join(work, 'plugins')), ['installed_plugins.json']);
     // Without the obstacle the same sync succeeds, and a rerun copies nothing again.
     fs.rmSync(path.join(work, 'skills'));
-    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 1, marketplaces: 0, skills: 1, settings: 0 });
+    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 1, marketplaces: 0, skills: 1, commands: 0, agents: 0, settings: 0 });
     assert.equal(fs.readFileSync(path.join(work, 'plugins', 'cache', 'market', 'one', '1.0.0', 'a.txt'), 'utf8'), 'x');
-    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 0, marketplaces: 0, skills: 0, settings: 0 });
+    assert.deepEqual(syncCodeSetup(personal, work), { plugins: 0, marketplaces: 0, skills: 0, commands: 0, agents: 0, settings: 0 });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

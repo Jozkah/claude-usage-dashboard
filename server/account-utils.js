@@ -86,3 +86,19 @@ export function credentialsExpired(creds, now) {
   const at = Number(creds && creds.expiresAt);
   return Number.isFinite(at) && at > 0 && at < now;
 }
+
+/**
+ * Which Claude Desktop profile belongs to an account's config folder.
+ * `~/.claude` is the normal (Personal) app; `~/.claude-<name>` maps to the separate profile `<Name>`
+ * (launch-profile.ps1). Anything else has no Desktop profile.
+ * @returns {{ kind: 'personal' } | { kind: 'profile', name: string } | null}
+ */
+export function desktopProfileFor(configDir, home) {
+  const resolved = path.resolve(configDir);
+  if (resolved === path.join(home, '.claude')) return { kind: 'personal' };
+  if (path.dirname(resolved) !== path.resolve(home)) return null;
+  const match = /^\.claude-([a-z][a-z0-9]{0,30})$/i.exec(path.basename(resolved));
+  if (!match) return null;
+  const word = match[1];
+  return { kind: 'profile', name: word[0].toUpperCase() + word.slice(1).toLowerCase() };
+}

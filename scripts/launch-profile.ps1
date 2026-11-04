@@ -1,12 +1,12 @@
 param(
-  [Parameter(Mandatory)][ValidateSet('Work', 'Third')][string]$Name
+  [Parameter(Mandatory)][ValidatePattern('^[A-Za-z][A-Za-z0-9]{0,31}$')][string]$Name
 )
 $ErrorActionPreference = 'Stop'
 $logDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'data'
 try {
   # Claude Code config dir for this profile (also set by claude-work.cmd for its CLI half).
   $configDir = Join-Path $env:USERPROFILE ('.claude-' + $Name.ToLowerInvariant())
-  if ($Name -eq 'Third') {
+  if ($Name -ne 'Work') {
     $env:CLAUDE_CONFIG_DIR = $configDir
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
   }

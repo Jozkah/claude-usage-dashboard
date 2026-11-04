@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Hourglass, WifiOff, X } from 'lucide-react';
-import { removeAccount, shareLocalChats, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
+import { openClaude, removeAccount, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
 import { useEffectsPref } from './lib/effects';
@@ -86,14 +86,19 @@ export default function App() {
   };
 
   const menuActions = (target: Account): MenuAction[] => {
+    const out: MenuAction[] = [
+      { label: `Open Claude Code as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name), 'Could not open Claude Code.') },
+      { label: `Open Claude Desktop as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'desktop', target.name), 'Could not open Claude Desktop.') },
+    ];
     // source for chat sharing: the 'personal' account when present, otherwise any other account
     const source = accounts.find((a) => a.id === 'personal' && a.id !== target.id) ?? accounts.find((a) => a.id !== target.id);
-    if (!source) return [];
-    const out: MenuAction[] = [
+    if (!source) return out;
+    out.push(
+      { label: 'Sync all accounts (chats, skills, plugins)', run: () => void runAction(syncAllAccounts, 'Could not sync the accounts.') },
       { label: `Share ${source.name} CLI chats with ${target.name}`, run: () => void runAction(() => shareLocalChats(source.id, target.id, target.name), 'Could not share local chats.') },
       { label: 'Sync local Desktop chats across profiles', run: () => void runAction(syncDesktopChats, 'Could not sync Desktop sessions.') },
       { label: 'Sync Desktop chat names and groups', run: () => void runAction(syncDesktopLabels, 'Could not sync Desktop names and groups.') },
-    ];
+    );
     const from = accounts.find((a) => a.id === 'personal' && a.id !== target.id) ?? source;
     out.push({ label: 'Copy local Code plugins and skills…', run: () => { setContextAccount(null); setSetup({ open: true, sourceId: from.id, targetId: target.id }); } });
     return out;

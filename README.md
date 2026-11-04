@@ -104,6 +104,7 @@ This action needs dashboard running directly on same computer as Claude Code. It
 | `TZ` | `UTC` | Docker only: time zone of the container (set in `docker-compose.yml`) |
 | `ALLOWED_HOSTS` | | Extra host names allowed, comma separated (to open it from another device) |
 | `ALLOW_ANY_HOST` | off | `1` accepts any host name. Only on a network you trust |
+| `ACCOUNT_AUTO_SYNC` | on | `0` stops the 15-minute automatic account sync. It links every account's `projects` folder to the first account's (shared Claude Code chats) and copies missing skills, commands, agents, plugins and marketplaces between all accounts. It never overwrites or deletes. Run it on demand from an account's ⋮ menu → *Sync all accounts* |
 | `DASHBOARD_NO_REFRESH` | off | `1` stops the dashboard renewing expired Claude Code logins. By default it uses the stored refresh token (like Claude Code does) and writes the new tokens back to that folder's `.credentials.json` |
 | `DASHBOARD_TOKEN` | unset | Shared secret for mutating routes (add/delete account, sign-in, sync). Send as `X-Dashboard-Token` or `Authorization: Bearer`, or open `/?token=...` once to set a cookie. With `ALLOW_ANY_HOST=1` and no token, those routes return 403 |
 | `DASHBOARD_SYNC_STATE_DIR` | `<DATA_DIR or home>/.claude-usage-sync` | Where sync baselines and state are kept |
@@ -159,3 +160,5 @@ Windows launchers write logs to `data/` (`dashboard-watchdog.log`, `dashboard-se
   system asks for reduced motion.
 
 API: `GET /api/health` returns `{ok, uptime, mock}` without contacting Anthropic (used by the Docker healthcheck and the watchdog). `ALLOWED_HOSTS` is case-insensitive and ignores ports. New accounts need an existing config folder.
+
+Account menu (⋮): *Open Claude Code as …* starts a terminal with `CLAUDE_CONFIG_DIR` set to that account; *Open Claude Desktop as …* starts the matching Desktop profile (`~/.claude` is the normal app, `~/.claude-<name>` is the separate profile `<Name>`).

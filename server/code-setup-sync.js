@@ -107,6 +107,8 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
   const created = [];
   const undo = [];
   let skills = 0;
+  let commands = 0;
+  let agents = 0;
   const copyUnit = (from, to) => {
     let top = path.dirname(to);
     while (!fs.existsSync(path.dirname(top)) && path.dirname(top) !== top) top = path.dirname(top);
@@ -124,16 +126,21 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
       if (!fs.existsSync(from)) continue;
       for (const [s, d] of missingUnits(from, path.join(targetPlugins, name), depth)) copyUnit(s, d);
     }
-    const sourceSkills = path.join(source, 'skills');
-    if (fs.existsSync(sourceSkills)) {
-      for (const entry of fs.readdirSync(sourceSkills, { withFileTypes: true })) {
-        if (entry.name === 'synced') continue; // account-managed skills remain account-specific
-        const destination = path.join(target, 'skills', entry.name);
+    // Skills, slash commands and subagents are plain files, so they are copied the same way: missing entries only.
+    const counts = { skills: 0, commands: 0, agents: 0 };
+    for (const kind of /** @type {('skills'|'commands'|'agents')[]} */ (['skills', 'commands', 'agents'])) {
+      const from = path.join(source, kind);
+      if (!fs.existsSync(from)) continue;
+      for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+        if (kind === 'skills' && entry.name === 'synced') continue; // account-managed skills remain account-specific
+        if (entry.name.endsWith('.tmp') || entry.name.includes('.sync-')) continue;
+        const destination = path.join(target, kind, entry.name);
         if (fs.existsSync(destination)) continue;
-        copyUnit(path.join(sourceSkills, entry.name), destination);
-        skills++;
+        copyUnit(path.join(from, entry.name), destination);
+        counts[kind]++;
       }
     }
+    ({ skills } = counts); commands = counts.commands; agents = counts.agents;
     for (const [file, loaded, next] of [[installedFile, targetInstalledLoaded, targetInstalled],
       [knownFile, targetKnownLoaded, targetKnown], [settingsFile, targetSettingsLoaded, targetSettings]]) {
       const revert = writeJsonIfChanged(file, loaded, next, stateDir);
@@ -144,5 +151,5 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
     for (const item of created.reverse()) fs.rmSync(item, { recursive: true, force: true });
     throw error;
   }
-  return { plugins, marketplaces, skills, settings };
+  return { plugins, marketplaces, skills, commands, agents, settings };
 }

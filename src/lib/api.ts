@@ -84,6 +84,22 @@ export async function startAccountLogin(id: string): Promise<void> {
   await postJson('/api/accounts/' + encodeURIComponent(id) + '/login', 'Could not start sign-in.');
 }
 
+export async function openClaude(id: string, kind: 'code' | 'desktop', name: string): Promise<string> {
+  await postJson('/api/accounts/' + encodeURIComponent(id) + '/open', 'Could not open Claude.', { kind });
+  return kind === 'code' ? `Claude Code opened in a new window as ${name}.` : `Claude Desktop is starting as ${name}.`;
+}
+
+interface AccountSyncResult { accounts: { name?: string; id: string; chats: string; setup: Record<string, number>; errors: string[] }[] }
+
+/** Links chats and merges skills, commands, agents and plugins across every account (additive, nothing is overwritten). */
+export async function syncAllAccounts(): Promise<string> {
+  const r = await postJson<AccountSyncResult>('/api/accounts/sync-all', 'Could not sync the accounts.');
+  const copied = r.accounts.reduce((t, a) => t + a.setup.skills + a.setup.commands + a.setup.agents + a.setup.plugins, 0);
+  const problems = r.accounts.flatMap((a) => a.errors.map((e) => `${a.name ?? a.id}: ${e}`));
+  const base = `All accounts synced: chats ${r.accounts.every((a) => a.chats !== 'kept separate') ? 'are shared' : 'partly shared'}, ${copied} skill/command/agent/plugin item${copied === 1 ? '' : 's'} copied.`;
+  return problems.length ? `${base} Needs attention: ${problems.join(' ')}` : base;
+}
+
 export async function shareLocalChats(sourceId: string, targetId: string, targetName = 'the target account'): Promise<string> {
   const result = await postJson<{ alreadyShared?: boolean }>('/api/chats/share', 'Could not share local chats.', { sourceId, targetId });
   return `${result.alreadyShared ? 'Local chats already shared.' : 'Local chats shared.'} In ${targetName} Desktop Code, start a local session and type /resume to pick a chat.`;

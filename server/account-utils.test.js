@@ -44,3 +44,15 @@ test('session freshness and credential expiry', () => {
   assert.ok(!credentialsExpired({ expiresAt: now + 1 }, now));
   assert.ok(!credentialsExpired({}, now));
 });
+
+test('desktopProfileFor maps config folders to Claude Desktop profiles', async () => {
+  const { desktopProfileFor } = await import('./account-utils.js');
+  const path = await import('node:path');
+  const home = path.resolve('/home/u');
+  assert.deepEqual(desktopProfileFor(path.join(home, '.claude'), home), { kind: 'personal' });
+  assert.deepEqual(desktopProfileFor(path.join(home, '.claude-work'), home), { kind: 'profile', name: 'Work' });
+  assert.deepEqual(desktopProfileFor(path.join(home, '.claude-work2'), home), { kind: 'profile', name: 'Work2' });
+  assert.equal(desktopProfileFor(path.join(home, 'elsewhere', '.claude-x'), home), null);
+  assert.equal(desktopProfileFor(path.join(home, '.claude-a b'), home), null);
+  assert.equal(desktopProfileFor(path.join(home, 'other'), home), null);
+});

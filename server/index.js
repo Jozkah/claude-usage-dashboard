@@ -27,10 +27,11 @@ import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyD
 import { syncMergedDesktopLabelsMany, desktopLabelSyncStatus } from './desktop-label-sync.js';
 import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
+import { syncAllAccounts } from './account-sync.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
   parseAllowedHosts, hostAllowed, guardMutation, SECURITY_HEADERS } from './http-utils.js';
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
-  credentialsExpired } from './account-utils.js';
+  credentialsExpired, desktopProfileFor } from './account-utils.js';
 import { createSessionReader } from './sessions.js';
 import { readCredentials, refreshCredentials } from './credentials.js';
 
@@ -82,6 +83,43 @@ async function desktopRunning() {
 }
 
 const loginStartedAt = new Map(); // accountId -> ms of last sign-in launch
+const openStartedAt = new Map(); // `${accountId}:${kind}` -> ms of last "open Claude as this account"
+
+// Accounts share chats (linked projects folder) and setup (skills, commands, agents, plugins). Additive only.
+const ACCOUNT_AUTO_SYNC = !MOCK && !ACCOUNTS_DIR && process.env.ACCOUNT_AUTO_SYNC !== '0';
+const ACCOUNT_SYNC_MS = 15 * 60 * 1000;
+let accountSyncStatus = { enabled: ACCOUNT_AUTO_SYNC, lastRun: null, lastError: null, result: null };
+let accountSyncBusy = false;
+function runAccountSync() {
+  if (accountSyncBusy) throw new HttpError(409, 'Account sync is already running.');
+  accountSyncBusy = true;
+  try {
+    const accounts = loadAccounts().map((a) => ({ id: a.id, name: a.name, configDir: expandHome(a.configDir) }));
+    const result = syncAllAccounts(accounts);
+    const errors = result.accounts.flatMap((a) => a.errors.map((e) => `${a.name || a.id}: ${e}`));
+    accountSyncStatus = { ...accountSyncStatus, lastRun: Date.now(), lastError: errors.length ? errors.join(' | ') : null, result };
+    return result;
+  } catch (error) {
+    if (!(error instanceof HttpError)) {
+      accountSyncStatus = { ...accountSyncStatus, lastRun: Date.now(), lastError: error instanceof Error ? error.message : String(error) };
+    }
+    throw error;
+  } finally { accountSyncBusy = false; }
+}
+function startAccountSync() {
+  const run = () => {
+    try {
+      const r = runAccountSync();
+      const n = r.accounts.reduce((t, a) => t + a.setup.skills + a.setup.commands + a.setup.agents + a.setup.plugins, 0);
+      if (n) console.log(`Account sync: ${n} item(s) copied`);
+    } catch (error) {
+      if (!(error instanceof HttpError)) console.warn('Account sync: ' + (error instanceof Error ? error.message : error));
+    }
+  };
+  const timers = [setTimeout(run, 15_000), setInterval(run, ACCOUNT_SYNC_MS)];
+  for (const t of timers) t.unref();
+  return () => { for (const t of timers) { clearTimeout(t); clearInterval(t); } };
+}
 const backoff = new Map(); // accountId -> { until, wait } after HTTP 429
 const MIN_FORCE_MS = 10 * 1000;
 const HISTORY_KEEP_MS = 8 * 864e5;
@@ -621,7 +659,7 @@ async function handler(req, res) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/chats/sync-status') {
-      return sendJson(res, 200, { ...desktopSyncStatus, labels: { ...labelSyncStatus, ...(await desktopLabelSyncStatus()) } });
+      return sendJson(res, 200, { ...desktopSyncStatus, accounts: accountSyncStatus, labels: { ...labelSyncStatus, ...(await desktopLabelSyncStatus()) } });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-labels') {
@@ -658,6 +696,57 @@ async function handler(req, res) {
         return sendJson(res, 200, syncCodeSetup(expandHome(personal.configDir), expandHome(work.configDir)));
       } catch (error) {
         return sendJson(res, 409, { error: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/accounts/sync-all') {
+      if (MOCK || ACCOUNTS_DIR) return sendJson(res, 400, { error: 'Account sync requires a direct installation.' });
+      if (blocked(req, res)) return;
+      try { return sendJson(res, 200, runAccountSync()); }
+      catch (error) { return sendJson(res, error instanceof HttpError ? error.status : 409, { error: error.message }); }
+    }
+
+    if (req.method === 'POST' && /^\/api\/accounts\/[^/]+\/open$/.test(url.pathname)) {
+      if (MOCK || ACCOUNTS_DIR || process.platform !== 'win32') {
+        return sendJson(res, 400, { error: 'Opening Claude requires a direct Windows installation.' });
+      }
+      if (blocked(req, res)) return;
+      const body = await parseJsonBody(req);
+      if (body.kind !== 'code' && body.kind !== 'desktop') return sendJson(res, 400, { error: 'kind must be "code" or "desktop".' });
+      const id = decodeId(url.pathname.split('/')[3]);
+      const account = loadAccounts().find((candidate) => candidate.id === id);
+      if (!account) return sendJson(res, 404, { error: 'Account not found.' });
+      const configDir = expandHome(account.configDir);
+      if (!fs.existsSync(configDir)) return sendJson(res, 400, { error: 'Config folder does not exist.' });
+      const key = `${id}:${body.kind}`;
+      if (Date.now() - (openStartedAt.get(key) || 0) < 5000) return sendJson(res, 409, { error: 'Claude was just opened for this account.' });
+      const env = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+      /** @type {[string, string[], import('node:child_process').SpawnOptions]} */
+      let launch;
+      if (body.kind === 'code') {
+        launch = ['cmd.exe', ['/k', 'claude'], { env, cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: false }];
+      } else {
+        const profile = desktopProfileFor(configDir, os.homedir());
+        if (!profile) return sendJson(res, 400, { error: 'Claude Desktop profiles exist for ~/.claude and ~/.claude-<name> folders only.' });
+        const common = ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass'];
+        /** @type {import('node:child_process').SpawnOptions} */
+        const hidden = { env, detached: true, stdio: 'ignore', windowsHide: true };
+        launch = profile.kind === 'personal'
+          ? ['powershell.exe', [...common, '-Command',
+            "$p = Get-AppxPackage -Name Claude | Select-Object -First 1; if (-not $p) { exit 1 }; Start-Process ('shell:AppsFolder\\' + $p.PackageFamilyName + '!Claude')"], hidden]
+          : ['powershell.exe', [...common, '-File', path.join(__dirname, '..', 'scripts', 'launch-profile.ps1'), '-Name', profile.name], hidden];
+      }
+      openStartedAt.set(key, Date.now());
+      try {
+        const child = spawn(launch[0], launch[1], launch[2]);
+        await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+        child.on('error', (error) => console.error('Open Claude error:', error));
+        child.unref();
+        return sendJson(res, 200, { ok: true });
+      } catch (error) {
+        openStartedAt.delete(key);
+        console.error('Could not open Claude:', error);
+        return sendJson(res, 500, { error: 'Could not open Claude: ' + error.message });
       }
     }
 
@@ -797,7 +886,7 @@ function startDesktopSync() {
  * Start listening. Options default to the environment; tests pass port 0 and turn side effects off.
  * Resolves with the listening http.Server (its close() also stops the desktop sync timers).
  */
-export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync = DESKTOP_AUTO_SYNC,
+export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync = DESKTOP_AUTO_SYNC, accountSync = ACCOUNT_AUTO_SYNC,
   openBrowser = process.env.NO_OPEN !== '1' } = {}) {
   const server = createServer();
   return new Promise((resolve, reject) => {
@@ -813,6 +902,10 @@ export function start({ port = PORT, host = HOST, scanner = !MOCK, desktopSync =
       if (scanner) startTokenScan();
       if (desktopSync) {
         const stop = startDesktopSync();
+        server.once('close', stop);
+      }
+      if (accountSync) {
+        const stop = startAccountSync();
         server.once('close', stop);
       }
       if (openBrowser && fs.existsSync(DIST)) {
