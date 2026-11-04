@@ -24,7 +24,7 @@ import { nextUsagePollAt } from './usage-schedule.js';
 import { activeSessionState } from './session-activity.js';
 import { shareLocalChats } from './chat-sharing.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
-import { syncMergedDesktopLabelsMany } from './desktop-label-sync.js';
+import { syncMergedDesktopLabelsMany, desktopLabelSyncStatus } from './desktop-label-sync.js';
 import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
@@ -439,7 +439,7 @@ function getStatus(acc, index, force) {
 }
 
 async function loadStatus(acc, index, force) {
-  latestUsage?.seedFromHistory(acc, history[acc.id], LABELS);
+  latestUsage?.seedFromHistory(acc, history[acc.id], LABELS, cache.get(acc.id)?.value?.plan);
   const hit = cache.get(acc.id);
   const age = hit ? Date.now() - hit.at : Infinity;
   const previous = hit?.value ?? latestUsage?.peek(acc);
@@ -646,7 +646,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/chats/sync-status') {
-      return sendJson(res, 200, { ...desktopSyncStatus, labels: labelSyncStatus });
+      return sendJson(res, 200, { ...desktopSyncStatus, labels: { ...labelSyncStatus, ...(await desktopLabelSyncStatus()) } });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/chats/sync-labels') {
@@ -818,6 +818,7 @@ if (DESKTOP_AUTO_SYNC) {
       const result = await syncMergedDesktopLabelsMany(profiles);
       labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false };
       if (!Object.values(await desktopProfileState(profiles)).some(Boolean)) syncedDuringClosure = true;
+      if (result.conflicts?.length) console.warn(`Desktop labels: ${result.conflicts.length} assignment conflict(s); first profile wins`);
       if (result.titles || result.groups) console.log(`Desktop labels: ${result.titles} titles, ${result.groups} groups, ${result.assignments} assignments`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -104,6 +104,8 @@ This action needs dashboard running directly on same computer as Claude Code. It
 | `TZ` | `UTC` | Docker only: time zone of the container (set in `docker-compose.yml`) |
 | `ALLOWED_HOSTS` | | Extra host names allowed, comma separated (to open it from another device) |
 | `ALLOW_ANY_HOST` | off | `1` accepts any host name. Only on a network you trust |
+| `DASHBOARD_TOKEN` | unset | Shared secret for mutating routes (add/delete account, sign-in, sync). Send as `X-Dashboard-Token`, or open `/?token=...` once to set a cookie. With `ALLOW_ANY_HOST=1` and no token, those routes return 403 |
+| `DASHBOARD_SYNC_STATE_DIR` | `<DATA_DIR or home>/.claude-usage-sync` | Where sync baselines and state are kept |
 | `NO_OPEN` | off | `1` stops it opening the browser on start |
 | `DESKTOP_AUTO_SYNC` | on for direct Windows installs | `0` disables automatic copying of new local Desktop session records |
 
@@ -152,3 +154,5 @@ Windows launchers write logs to `data/` (`dashboard-watchdog.log`, `dashboard-se
   from chat logs. Estimates are not subscription charges.
 - The trend charts, rings and counters are animated. Animations switch off automatically if your
   system asks for reduced motion.
+
+API: `GET /api/health` returns `{ok, uptime, mock}` without contacting Anthropic (used by the Docker healthcheck and the watchdog). `ALLOWED_HOSTS` is case-insensitive and ignores ports. New accounts need an existing config folder.

@@ -10,6 +10,7 @@ const files = readdirSync(path.join(root, 'server'))
   .filter((name) => name.endsWith('.test.js'))
   .sort()
   .map((name) => path.join('server', name));
+files.push(path.join('src', 'lib', 'lib.test.mjs'));
 if (!files.length) {
   console.error('No server/*.test.js files found.');
   process.exit(1);
