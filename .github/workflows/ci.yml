@@ -11,6 +11,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'tsconfig.server.json'
+      - 'eslint.config.js'
       - 'vite.config.ts'
       - '.nvmrc'
       - '.github/workflows/ci.yml'
@@ -32,6 +34,9 @@ jobs:
           cache: npm
       - run: npm ci --no-fund
       - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run typecheck:server
+        continue-on-error: true
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high
         continue-on-error: true

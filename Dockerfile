@@ -1,3 +1,6 @@
+# Base image is pinned to the Node 22 LTS line (matches .nvmrc), not to a digest: a digest must be
+# refreshed by hand or by a bot, and the Dependabot "docker" ecosystem (see .github/dependabot.yml)
+# bumps the tag. To pin exactly, use: FROM node:22-alpine@sha256:<digest>  (docker buildx imagetools inspect node:22-alpine).
 # --- build the web app ---
 FROM node:22-alpine AS build
 WORKDIR /app
