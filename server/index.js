@@ -566,7 +566,8 @@ async function handler(req, res) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/tokens') {
-      const days = Math.max(1, Math.min(365, Number(url.searchParams.get('days')) || 30));
+      const daysParam = url.searchParams.get('days');
+      const days = daysParam === 'all' ? Infinity : Math.max(1, Math.min(3650, Number(daysParam) || 30));
       const report = MOCK ? mockTokenReport(days) : getTokenReport(days);
       return sendJson(res, 200, { ...report, today: localDayKey(), timeZone: localTimeZone() });
     }

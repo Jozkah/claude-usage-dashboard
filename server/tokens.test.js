@@ -242,3 +242,20 @@ test('large state is written in chunks and reloads identically', async () => {
     assert.equal(r.getReport(7, NOW).days[0].input, 10);
   } finally { t.done(); }
 });
+
+test('counts requests, failed (API error) and canceled (user interrupt) per day; repeated uuids count once; "all" keeps every day', () => {
+  const s = createTokenStore();
+  const f = { offset: 0, pending: null };
+  s.state.files.f = f;
+  const err = JSON.stringify({ type: 'assistant', uuid: 'e1', isApiErrorMessage: true, timestamp: NOON, message: { id: 'x', model: '<synthetic>', content: [{ type: 'text', text: 'API Error' }] } });
+  const stop = JSON.stringify({ type: 'user', uuid: 'u1', timestamp: NOON, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+  s.ingest(line('a'), f);
+  s.ingest(line('b'), f);
+  s.ingest(err, f); s.ingest(err, f);
+  s.ingest(stop, f); s.ingest(stop, f);
+  s.ingest(line('old', { ts: '2025-01-05T12:00:00' }), f);
+  const day = s.getReport(7, NOW).days[0];
+  assert.deepEqual([day.requests, day.failed, day.canceled], [2, 1, 1]);
+  assert.equal(s.getReport(Infinity, NOW).days.length, 2);
+  assert.equal(s.getReport(7, NOW).days.length, 1);
+});

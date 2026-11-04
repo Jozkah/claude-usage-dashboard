@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { priceFor, costOf, promptClass, promptOfClass } from './pricing.js';
 
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 const SEEN_LIMIT = 100000; // committed message keys kept for de-duplication across files
 const HEAD_BYTES = 64; // first and last-read bytes of a file remembered to detect a rewrite
 const CHUNK_CHARS = 1 << 20; // state is serialized and written in pieces of about this size
@@ -29,6 +29,7 @@ const dayKey = (ts) => {
 };
 /** First day of a `days`-long window ending today, by calendar (not 24h blocks, so DST-safe). */
 const cutoffKey = (days, now) => {
+  if (days === Infinity) return '';
   const d = new Date(now);
   d.setDate(d.getDate() - (Math.max(1, days) - 1));
   return dayKey(d);
@@ -49,7 +50,7 @@ function priceOf(model) {
 
 const hashKey = (id, requestId) => crypto.createHash('sha1').update(`${id}|${requestId || ''}`).digest('base64').slice(0, 16);
 
-/** Key of one usage bucket: [model, project, speed, tier, geo, prompt-size class]. Values are [in,out,cr,c5,c1,search]. */
+/** Key of one usage bucket: [model, project, speed, tier, geo, prompt-size class]. Values are [in,out,cr,c5,c1,search,requests]. */
 const variantKey = (r) => JSON.stringify([r.model, r.project, r.speed || '', r.tier || '', r.geo || '', promptClass(r.in + r.cr + r.c5 + r.c1)]);
 
 export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
@@ -130,15 +131,36 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
       remember(r.key);
     }
     const day = (state.days[r.day] ||= { u: {} });
-    const c = (day.u[variantKey(r)] ||= [0, 0, 0, 0, 0, 0]);
-    c[0] += r.in; c[1] += r.out; c[2] += r.cr; c[3] += r.c5; c[4] += r.c1; c[5] += r.search || 0;
+    const c = (day.u[variantKey(r)] ||= [0, 0, 0, 0, 0, 0, 0]);
+    c[0] += r.in; c[1] += r.out; c[2] += r.cr; c[3] += r.c5; c[4] += r.c1; c[5] += r.search || 0; c[6] += 1;
     dirty = true;
   }
 
   /* A message is logged once per content block, all with the same message id. Keep the
      last block's numbers (they are final) and commit when the id changes. Ids already
      committed (any file) are skipped, so resumed or copied sessions do not double count. */
+  /** Failed requests (API error messages) and canceled ones (user interrupts) are counted per day as day.e = [failed, canceled]. */
+  function ingestEvent(line) {
+    let j;
+    try { j = JSON.parse(line); } catch { return; }
+    if (!j) return;
+    const failed = j.type === 'assistant' && j.isApiErrorMessage === true;
+    const canceled = !failed && j.type === 'user' && JSON.stringify(j.message?.content ?? '').includes('[Request interrupted by user');
+    if (!failed && !canceled) return;
+    const day = dayKey(j.timestamp);
+    if (!day) return;
+    if (j.uuid) {
+      const key = hashKey(j.uuid, 'event');
+      if (seen.has(key)) return;
+      remember(key);
+    }
+    const e = ((state.days[day] ||= { u: {} }).e ||= [0, 0]);
+    e[failed ? 0 : 1] += 1;
+    dirty = true;
+  }
+
   function ingest(line, f) {
+    if (line.includes('"isApiErrorMessage":true') || line.includes('[Request interrupted by user')) { ingestEvent(line); return; }
     if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
     let j;
     try { j = JSON.parse(line); } catch { return; }
@@ -321,6 +343,7 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     const price = priceOf(model);
     const cost = costOf(price, { in: c[0], out: c[1], cr: c[2], c5: c[3], c1: c[4], search: c[5], speed, tier, geo, prompt: promptOfClass(pc) });
     const tok = c[0] + c[1] + c[2] + c[3] + c[4];
+    a.requests += c[6] || 0;
     a.input += c[0]; a.output += c[1]; a.cacheRead += c[2]; a.cacheWrite += c[3] + c[4];
     a.cost += cost;
     if (!price) a.unpriced += tok;
@@ -338,12 +361,13 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     const cutoff = cutoffKey(days, now);
     const aggs = new Map();
     const agg = (day) => {
-      if (!aggs.has(day)) aggs.set(day, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0, models: {}, projects: {} });
+      if (!aggs.has(day)) aggs.set(day, { requests: 0, failed: 0, canceled: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0, models: {}, projects: {} });
       return aggs.get(day);
     };
     for (const [day, b] of Object.entries(state.days)) {
       if (day < cutoff) continue;
       for (const [k, c] of Object.entries(b.u || {})) addUsage(agg(day), k, c);
+      if (b.e) { const a = agg(day); a.failed += b.e[0] || 0; a.canceled += b.e[1] || 0; }
     }
     // each file's latest message is not committed yet: include it virtually, state stays untouched
     const counted = new Set();
@@ -354,12 +378,13 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
         if (seen.has(r.key) || counted.has(r.key)) continue;
         counted.add(r.key);
       }
-      addUsage(agg(r.day), variantKey(r), [r.in, r.out, r.cr, r.c5, r.c1, r.search || 0]);
+      addUsage(agg(r.day), variantKey(r), [r.in, r.out, r.cr, r.c5, r.c1, r.search || 0, 1]);
     }
     const out = [...aggs.entries()]
       .sort(([a], [b]) => (a < b ? 1 : -1))
       .map(([date, a]) => ({
         date,
+        requests: a.requests, failed: a.failed, canceled: a.canceled,
         input: a.input, output: a.output, cacheRead: a.cacheRead, cacheWrite: a.cacheWrite,
         total: a.input + a.output + a.cacheRead + a.cacheWrite,
         cost: a.cost,
@@ -391,6 +416,7 @@ export function getTokenReport(days = 30, now = Date.now()) {
 /* ----------------------------------- mock ----------------------------------- */
 
 export function mockTokenReport(days = 30) {
+  days = Math.min(days, 365);
   const out = [];
   for (let i = 0; i < days; i++) {
     const d = new Date();
@@ -399,7 +425,7 @@ export function mockTokenReport(days = 30) {
     const k = 0.4 + 0.6 * Math.abs(Math.sin(i * 1.7));
     const total = Math.round(k * 2.4e9);
     out.push({
-      date, input: Math.round(total * 0.0005), output: Math.round(total * 0.004),
+      date, requests: Math.round(k * 900), failed: i % 6 === 0 ? 3 : 0, canceled: i % 4 === 0 ? 2 : 0, input: Math.round(total * 0.0005), output: Math.round(total * 0.004),
       cacheRead: Math.round(total * 0.93), cacheWrite: Math.round(total * 0.065),
       total, cost: k * 2400, unpriced: 0,
       models: [{ name: 'claude-opus-4-6', tokens: Math.round(total * 0.8), cost: k * 2100 }, { name: 'claude-sonnet-4-5', tokens: Math.round(total * 0.2), cost: k * 300 }],

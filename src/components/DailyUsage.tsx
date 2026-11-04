@@ -16,7 +16,7 @@ function useTokens() {
     const load = async () => {
       let wait = 60_000;
       try {
-        const j = await fetchTokens(90, ctl.signal);
+        const j = await fetchTokens('all', ctl.signal);
         if (!stop) { setReport(j); setError(null); }
         if (j.scanning || !j.ready) wait = 5_000;
       } catch (e) {
@@ -43,7 +43,12 @@ const addDays = (iso: string, n: number) => {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 };
 
-const RANGES = [7, 30, 90] as const;
+const RANGES = [7, 30, 90, 'all'] as const;
+const pct = (n: number, d: number) => (d > 0 ? `${((n / d) * 100).toFixed(n / d >= 0.999 || n / d < 0.1 ? 1 : 0)}%` : '–');
+
+/** One colour per model, assigned by all-time usage so a model keeps its colour when the range changes. */
+const MODEL_COLORS = ['#4f7cff', '#3fb68b', '#8b6cf0', '#e0a030', '#e0587f', '#38b2d6', '#d6743a'];
+const OTHER_COLOR = '#7b8394';
 type Metric = 'tokens' | 'cost';
 
 function Seg<T extends string | number>({ value, options, onChange, label, group }: { value: T; options: readonly T[]; onChange: (v: T) => void; label: (v: T) => string; group: string }) {
@@ -88,6 +93,56 @@ function Shares({ title, items, total, metric }: { title: string; items: NamedSh
   );
 }
 
+type Stats = { success: number; failed: number; canceled: number; input: number; output: number; cacheRead: number; cacheWrite: number };
+
+function Tile({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint?: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-line bg-frame/50 px-3 py-2.5" title={hint}>
+      <div className="text-[11.5px] text-muted-fg">{label}</div>
+      <div className={`mt-0.5 truncate text-[17px] font-semibold tabular-nums ${tone ?? ''}`}>{value}</div>
+    </div>
+  );
+}
+
+/** Request outcomes and token mix for the chosen range. Success = answered requests; failed = API errors; canceled = user interrupts. */
+function RequestStats({ stats: s }: { stats: Stats }) {
+  const requests = s.success + s.failed + s.canceled;
+  const prompt = s.input + s.cacheRead + s.cacheWrite;
+  const mix = [
+    { name: 'Uncached input', v: s.input, color: '#4f7cff' },
+    { name: 'Cache read', v: s.cacheRead, color: '#e0a030' },
+    { name: 'Cache write', v: s.cacheWrite, color: '#e0587f' },
+    { name: 'Output', v: s.output, color: '#3fb68b' },
+  ];
+  const all = mix.reduce((n, m) => n + m.v, 0);
+  return (
+    <div className="mt-6 grid gap-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <Tile label="Requests" value={tok(requests)} />
+        <Tile label="Success" value={tok(s.success)} tone="text-good" />
+        <Tile label="Failed" value={tok(s.failed)} tone={s.failed ? 'text-bad' : ''} hint="API errors such as overloaded or rate limited" />
+        <Tile label="Canceled" value={tok(s.canceled)} hint="Requests you interrupted" />
+        <Tile label="Success rate" value={pct(s.success, requests)} tone="text-good" />
+        <Tile label="Cache hit rate" value={pct(s.cacheRead, prompt)} tone="text-warn" hint="Cache reads as a share of all prompt tokens" />
+      </div>
+      <div>
+        <div className="mb-2 text-[12px] font-medium text-muted-fg">Token mix</div>
+        <div className="flex h-2 overflow-hidden rounded-full bg-frame" role="img" aria-label={mix.map((m) => `${m.name} ${pct(m.v, all)}`).join(', ')}>
+          {mix.map((m) => <div key={m.name} style={{ flexGrow: m.v, flexBasis: 0, background: m.color }} />)}
+        </div>
+        <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[12.5px] sm:grid-cols-4">
+          {mix.map((m) => (
+            <li key={m.name} className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 truncate"><span className="size-2 shrink-0 rounded-sm" style={{ background: m.color }} />{m.name}</span>
+              <span className="tabular-nums text-muted-fg">{tok(m.v)} · {pct(m.v, all)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: number }) {
   const { report, error, retry } = useTokens();
   const [range, setRange] = useState<(typeof RANGES)[number]>(30);
@@ -101,10 +156,21 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
     const latest = [...byDate.keys()].sort().pop() ?? '';
     const local = key(new Date());
     const today = report?.today && DAY.test(report.today) ? report.today : latest > local ? latest : local;
-    for (let i = range - 1; i >= 0; i--) {
+    const span = range === 'all'
+      ? Math.max(1, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${[...byDate.keys()].sort()[0] ?? today}T00:00:00Z`)) / 86_400_000) + 1)
+      : range;
+    for (let i = span - 1; i >= 0; i--) {
       const k = addDays(today, -i);
       list.push({ date: k, d: byDate.get(k) });
     }
+    // model colours: ranked by all-time tokens, the first few get a colour, the rest share grey
+    const allTime = new Map<string, number>();
+    for (const d of report?.days ?? []) for (const m of d.models) allTime.set(m.name, (allTime.get(m.name) ?? 0) + m.tokens);
+    const ranked = [...allTime.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+    const colorOf = (name: string) => { const i = ranked.indexOf(name); return i >= 0 && i < MODEL_COLORS.length ? MODEL_COLORS[i] : OTHER_COLOR; };
+    const legend = ranked.slice(0, MODEL_COLORS.length).filter((n) => list.some((x) => x.d?.models.some((m) => m.name === n)))
+      .map((n) => ({ name: modelName(n), color: colorOf(n) }));
+    if (ranked.length > MODEL_COLORS.length) legend.push({ name: 'Other', color: OTHER_COLOR });
     const days = list.map((x) => x.d).filter((x): x is DayUsage => !!x);
     const pickModels = (d: DayUsage) => d.models;
     const merge = (pick: (d: DayUsage) => NamedShare[]) => {
@@ -120,12 +186,14 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
     const totalTok = days.reduce((s, d) => s + d.total, 0);
     const totalCost = days.reduce((s, d) => s + d.cost, 0);
     const unpriced = days.reduce((s, d) => s + d.unpriced, 0);
+    const sumOf = (k: 'requests' | 'failed' | 'canceled' | 'input' | 'output' | 'cacheRead' | 'cacheWrite') => days.reduce((n, d) => n + (d[k] || 0), 0);
+    const stats = { success: sumOf('requests'), failed: sumOf('failed'), canceled: sumOf('canceled'), input: sumOf('input'), output: sumOf('output'), cacheRead: sumOf('cacheRead'), cacheWrite: sumOf('cacheWrite') };
     const val = (d?: DayUsage) => (d ? (metric === 'tokens' ? d.total : d.cost) : 0);
     return {
       list,
       max: Math.max(1, ...list.map((x) => val(x.d))),
       val,
-      totalTok, totalCost, unpriced,
+      totalTok, totalCost, unpriced, stats, legend, colorOf,
       activeDays: days.length,
       models: merge(pickModels),
       projects: merge((d) => d.projects),
@@ -145,7 +213,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
       right={
         <div className="flex items-center gap-2">
           <Seg group="Metric" value={metric} options={['tokens', 'cost'] as const} onChange={setMetric} label={(v) => (v === 'tokens' ? 'Tokens' : 'Est. cost')} />
-          <Seg group="Days shown" value={range} options={RANGES} onChange={setRange} label={(v) => `${v}d`} />
+          <Seg group="Days shown" value={range} options={RANGES} onChange={setRange} label={(v) => (v === 'all' ? 'All' : `${v}d`)} />
         </div>
       }
     >
@@ -181,7 +249,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
                   {shown ? (metric === 'tokens' ? tok(shownVal ?? 0) : usd(shownVal ?? 0)) : metric === 'tokens' ? tok(view.totalTok) : usd(view.totalCost)}
                 </div>
                 <div className="mt-1.5 text-[12.5px] text-muted-fg">
-                  {shown ? shown.date : `last ${range} days`}
+                  {shown ? shown.date : range === 'all' ? 'all time' : `last ${range} days`}
                   {!shown && view.activeDays > 0 && (
                     <> · {metric === 'tokens' ? `${usd(view.totalCost)} est.` : `${tok(view.totalTok)} tokens`} · avg {metric === 'tokens' ? tok(view.totalTok / view.activeDays) : usd(view.totalCost / view.activeDays)}/active day</>
                   )}
@@ -189,10 +257,17 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
               </div>
             </div>
 
+            {view.legend.length > 0 && (
+              <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-muted-fg">
+                {view.legend.map((l) => (
+                  <li key={l.name} className="flex items-center gap-1.5"><span className="size-2 rounded-sm" style={{ background: l.color }} />{l.name}</li>
+                ))}
+              </ul>
+            )}
             <div
               role="group"
-              aria-label={`Daily ${metric === 'tokens' ? 'tokens' : 'estimated cost'}, last ${range} days`}
-              className="mt-4 flex h-36 items-end gap-[3px]"
+              aria-label={`Daily ${metric === 'tokens' ? 'tokens' : 'estimated cost'}, ${range === 'all' ? 'all time' : `last ${range} days`}`}
+              className="mt-3 flex h-36 items-end gap-[2px]"
               onPointerLeave={() => setHover(null)}
             >
               {view.list.map((x, i) => {
@@ -210,9 +285,14 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
                     onBlur={() => setHover(null)}
                   >
                     <div
-                      className={`w-full rounded-t-[3px] transition-colors ${hover === i ? 'bg-accent' : 'bg-accent/55'}`}
-                      style={{ height: v ? `${Math.max(3, (v / view.max) * 100)}%` : '2px', opacity: v ? 1 : 0.25, transition: 'height .7s var(--ease-out-expo)' }}
-                    />
+                      className="flex w-full flex-col-reverse overflow-hidden rounded-t-[3px] transition-opacity"
+                      style={{ height: v ? `${Math.max(3, (v / view.max) * 100)}%` : '2px', opacity: v ? (hover === null || hover === i ? 1 : 0.55) : 0.25, background: v ? undefined : 'var(--color-line)', transition: 'height .7s var(--ease-out-expo), opacity .15s' }}
+                    >
+                      {x.d && v > 0 && x.d.models.map((m) => {
+                        const mv = metric === 'tokens' ? m.tokens : m.cost;
+                        return <div key={m.name} style={{ flexGrow: mv, flexBasis: 0, minHeight: mv > 0 ? 1 : 0, background: view.colorOf(m.name) }} />;
+                      })}
+                    </div>
                   </div>
                 );
               })}
@@ -221,6 +301,8 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
               <span>{view.list[0]?.date.slice(5)}</span>
               <span>{view.list[view.list.length - 1]?.date.slice(5)}</span>
             </div>
+
+            <RequestStats stats={view.stats} />
 
             <div className="mt-6 grid gap-6 sm:grid-cols-2">
               <Shares title="By model" items={view.models} total={metric === 'tokens' ? view.totalTok : view.totalCost} metric={metric} />

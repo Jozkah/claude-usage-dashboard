@@ -42,7 +42,7 @@ async function fetchHistory(id: string, key: string, range: RangeKey, since?: nu
   return j.points ?? [];
 }
 
-export async function fetchTokens(days = 90, signal?: AbortSignal): Promise<TokenReport> {
+export async function fetchTokens(days: number | 'all' = 'all', signal?: AbortSignal): Promise<TokenReport> {
   const res = await fetchTimeout(`/api/tokens?days=${days}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return (await res.json()) as TokenReport;

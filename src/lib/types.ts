@@ -52,6 +52,9 @@ export type Level = 'good' | 'warn' | 'bad';
 export interface NamedShare { name: string; tokens: number; cost: number }
 export interface DayUsage {
   date: string;
+  requests: number;
+  failed: number;
+  canceled: number;
   input: number;
   output: number;
   cacheRead: number;
