@@ -15,3 +15,33 @@ test('detects three isolated Desktop instances from their profile paths', () => 
   assert.deepEqual(parseDesktopProcessState(profiles, processes),
     { personal: true, work: false, third: true });
 });
+
+const spaced = { personal: 'C:\\Users\\Me\\Claude-Data', work: 'C:\\Users\\First Last\\ClaudeProfiles\\Work' };
+const claude = (CommandLine) => ({ ExecutablePath: 'C:\\x\\Claude.exe', CommandLine });
+
+test('parses fully quoted and space-separated user-data-dir arguments', () => {
+  assert.equal(parseDesktopProcessState(spaced, [
+    claude('"C:\\x\\Claude.exe" "--user-data-dir=C:\\Users\\First Last\\ClaudeProfiles\\Work"')]).work, true);
+  assert.equal(parseDesktopProcessState(spaced, [
+    claude('"C:\\x\\Claude.exe" --user-data-dir "C:\\Users\\First Last\\ClaudeProfiles\\Work"')]).work, true);
+  assert.equal(parseDesktopProcessState(spaced, [
+    claude('"C:\\x\\Claude.exe" "--user-data-dir=C:\\Users\\Me\\Claude-Data"')]).personal, true);
+});
+
+test('ignores trailing slashes and case differences', () => {
+  const state = parseDesktopProcessState(spaced, [
+    claude('"C:\\x\\Claude.exe" --user-data-dir="c:\\users\\first last\\claudeprofiles\\work\\\\"')]);
+  assert.equal(state.work, true);
+  assert.equal(state.personal, false);
+});
+
+test('fails closed when a Desktop process cannot be attributed to a profile', () => {
+  assert.deepEqual(parseDesktopProcessState(spaced, [
+    claude('"C:\\x\\Claude.exe" --user-data-dir="D:\\Elsewhere"')]), { personal: true, work: true });
+});
+
+test('ignores unrelated processes and handles empty input', () => {
+  assert.deepEqual(parseDesktopProcessState(spaced, []), { personal: false, work: false });
+  assert.deepEqual(parseDesktopProcessState(spaced, [{ ExecutablePath: 'C:\\bin\\claude.exe', CommandLine: 'claude --help' }]),
+    { personal: false, work: false });
+});
