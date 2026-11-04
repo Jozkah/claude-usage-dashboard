@@ -112,7 +112,16 @@ test('modelName', () => {
   assert.equal(modelName('claude-3-opus-latest'), 'Claude Opus 3');
   assert.equal(modelName('us.anthropic.claude-sonnet-4-20250514-v1:0'), 'Claude Sonnet 4');
   assert.equal(modelName('unknown'), 'Unknown model');
-  assert.equal(modelName('gpt-x'), 'gpt-x');
+  assert.equal(modelName('gpt-6-sol'), 'GPT-6 Sol');
+  assert.equal(modelName('gpt-5.6-sol'), 'GPT-5.6 Sol');
+  assert.equal(modelName('codex-auto-review'), 'Codex Auto Review');
+  assert.equal(modelName('gemini-2.5-pro'), 'Gemini 2.5 Pro');
+  assert.equal(modelName('qwen3.8-27b'), 'Qwen3.8 27B');
+  assert.equal(modelName('big-pickle'), 'Big Pickle');
+  assert.equal(modelName('deepseek-v3'), 'DeepSeek V3');
+  assert.equal(modelName('o3-mini'), 'o3 Mini');
+  assert.equal(modelName('openai/gpt-5'), 'GPT-5');
+  assert.equal(modelName('/data/models/satgeze/Hy3-1M-GGUF/hy3-1M-MTP-Q4_K_M.gguf'), 'Hy3 1M MTP (Q4_K_M)');
 });
 
 test('elapsedFraction and mainWindows', () => {

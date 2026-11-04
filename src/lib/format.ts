@@ -87,6 +87,34 @@ export function mainWindows(a: Account): UsageWindow[] {
 
 /** Friendly model name from an API id (handles Bedrock/Vertex prefixes, dated and legacy ids). */
 const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
+const BRANDS: Record<string, string> = {
+  gpt: 'GPT', gemini: 'Gemini', gemma: 'Gemma', qwen: 'Qwen', deepseek: 'DeepSeek', kimi: 'Kimi', grok: 'Grok', llama: 'Llama',
+  glm: 'GLM', mistral: 'Mistral', mixtral: 'Mixtral', codex: 'Codex', phi: 'Phi', command: 'Command', minimax: 'MiniMax', hy: 'Hy',
+};
+const UPPER_WORDS = new Set(['mtp', 'vl', 'moe', 'ai', 'it', 'gguf', 'llm']);
+
+/** Name for models that are not Claude: provider prefixes and file paths are dropped, brands and sizes are cased (gpt-6-sol -> GPT-6 Sol). */
+export function otherModelName(id: string): string {
+  let s = (id.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? id).replace(/\.gguf$/i, '').replace(/:(?:latest|\d{4}-\d{2}-\d{2})$/i, '');
+  let quant = '';
+  const q = /[-_.](q\d(?:_[a-z0-9]+)*|f16|bf16|fp8|int4)$/i.exec(s);
+  if (q) { quant = ` (${q[1].toUpperCase()})`; s = s.slice(0, q.index); }
+  const tokens = s.split(/[-_ ]+/).filter(Boolean);
+  if (tokens.length === 0) return id;
+  const words = tokens.map((t, i) => {
+    const lower = t.toLowerCase();
+    if (/^\d+(\.\d+)*[bkm]$/i.test(t) || UPPER_WORDS.has(lower)) return t.toUpperCase();
+    if (/^o\d/.test(lower) && i === 0) return lower; // OpenAI o-series: o3, o4
+    const brand = /^([a-z]+?)(\d.*)?$/i.exec(t);
+    if (brand && BRANDS[brand[1].toLowerCase()]) return BRANDS[brand[1].toLowerCase()] + (brand[2] ?? '');
+    if (/^v\d/i.test(t)) return t.toUpperCase();
+    return /^\d/.test(t) ? t : cap(t);
+  });
+  // GPT-5.6 Sol: the version sticks to the brand with a hyphen
+  if (words[0] === 'GPT' && words[1] && /^\d/.test(words[1])) words.splice(0, 2, `GPT-${words[1]}`);
+  return words.join(' ') + quant;
+}
+
 export function modelName(id: string): string {
   const clean = id
     .replace(/^(?:[a-z]{2}\.)?anthropic\./i, '') // bedrock prefixes, optionally with a region
@@ -102,6 +130,6 @@ export function modelName(id: string): string {
   const old = /^claude-(\d+)-([a-z]+)(.*)$/i.exec(clean); // claude-3-opus
   if (old) return fmt(old[2], old[1], old[3]);
   const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(.*)$/i.exec(clean); // claude-sonnet-4-5
-  if (!match) return id === 'unknown' ? 'Unknown model' : id;
+  if (!match) return id === 'unknown' ? 'Unknown model' : otherModelName(id);
   return fmt(match[1], match[3] ? `${match[2]}.${match[3]}` : match[2], match[4]);
 }
