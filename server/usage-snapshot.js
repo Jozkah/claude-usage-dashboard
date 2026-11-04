@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import { visibleUsageWindows } from './plan-limits.js';
 
-export function createUsageSnapshot(file) {
+/** Cached windows whose reset time has passed no longer describe the current period: flag them. */
+function markExpired(windows, now) {
+  return windows.map((window) => {
+    const at = Date.parse(window?.resetsAt || '');
+    return Number.isFinite(at) && at <= now ? { ...window, expired: true } : window;
+  });
+}
+
+export function createUsageSnapshot(file, { now = Date.now } = {}) {
   let saved = {};
   try {
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -21,7 +29,8 @@ export function createUsageSnapshot(file) {
       const last = saved[account.id];
       if (!last || last.configDir !== account.configDir || !Array.isArray(last.windows) || !last.windows.length) return null;
       return { id: account.id, name: account.name, configDir: account.configDir,
-        fetchedAt: last.fetchedAt, plan: last.plan, windows: visibleUsageWindows(last.plan, last.windows), nextPollAt: last.nextPollAt,
+        fetchedAt: last.fetchedAt, plan: last.plan, windows: markExpired(visibleUsageWindows(last.plan, last.windows), now()), nextPollAt: last.nextPollAt,
+        ...(last.seeded && !last.plan ? { planUnknown: true } : {}),
         status: 'ok', stale: true, staleMessage: 'Waiting until reset approaches.' };
     },
     remember(account, value) {
@@ -41,7 +50,8 @@ export function createUsageSnapshot(file) {
       last.nextPollAt = at;
       write();
     },
-    seedFromHistory(account, history, labels) {
+    /** `plan` is the account's last known plan, so Max accounts hide the five-hour window right away. */
+    seedFromHistory(account, history, labels, plan) {
       if (saved[account.id] || !history || typeof history !== 'object') return;
       const windows = [];
       let fetchedAt = 0;
@@ -53,7 +63,7 @@ export function createUsageSnapshot(file) {
         fetchedAt = Math.max(fetchedAt, last[0]);
       }
       if (!windows.length) return;
-      saved[account.id] = { configDir: account.configDir, fetchedAt, windows };
+      saved[account.id] = { configDir: account.configDir, fetchedAt, windows, seeded: true, ...(plan ? { plan } : {}) };
       write();
     },
     fallback(account, failed) {
@@ -63,8 +73,9 @@ export function createUsageSnapshot(file) {
         ...failed,
         plan: last.plan,
         fetchedAt: last.fetchedAt,
-        windows: visibleUsageWindows(last.plan, last.windows),
+        windows: markExpired(visibleUsageWindows(last.plan, last.windows), now()),
         nextPollAt: last.nextPollAt,
+        ...(last.seeded && !last.plan ? { planUnknown: true } : {}),
         status: 'ok',
         stale: true,
         authStatus: failed.status,
