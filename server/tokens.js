@@ -347,14 +347,14 @@ export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
     a.input += c[0]; a.output += c[1]; a.cacheRead += c[2]; a.cacheWrite += c[3] + c[4];
     a.cost += cost;
     if (!price) a.unpriced += tok;
-    const m = (a.models[model] ||= { t: 0, c: 0 });
-    m.t += tok; m.c += cost;
+    const m = (a.models[model] ||= { t: 0, c: 0, n: 0, i: 0, o: 0, r: 0, w: 0 });
+    m.t += tok; m.c += cost; m.n += c[6] || 0; m.i += c[0]; m.o += c[1]; m.r += c[2]; m.w += c[3] + c[4];
     const pr = (a.projects[project] ||= { t: 0, c: 0 });
     pr.t += tok; pr.c += cost;
   }
 
   const top = (map) => Object.entries(map)
-    .map(([name, v]) => ({ name, tokens: v.t, cost: v.c }))
+    .map(([name, v]) => ({ name, tokens: v.t, cost: v.c, ...(v.n !== undefined ? { requests: v.n, input: v.i, output: v.o, cacheRead: v.r, cacheWrite: v.w } : {}) }))
     .sort((a, b) => b.tokens - a.tokens);
 
   function getReport(days = 30, now = Date.now()) {

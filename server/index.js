@@ -18,6 +18,8 @@ import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
+import { createOtherUsageStore, mergeReports } from './other-usage.js';
+import { priceFor } from './pricing.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { visibleUsageWindows } from './plan-limits.js';
 import { nextUsagePollAt } from './usage-schedule.js';
@@ -46,6 +48,7 @@ const EXPIRED_MESSAGE = 'Login expired and could not be renewed automatically. U
 const HOST = process.env.HOST || '127.0.0.1';
 const MOCK = process.env.MOCK === '1';
 const DATA_DIR = process.env.DATA_DIR || os.homedir();
+const otherUsage = createOtherUsageStore();
 const ACCOUNTS_DIR = process.env.ACCOUNTS_DIR || '';
 const ALLOW_ANY_HOST = process.env.ALLOW_ANY_HOST === '1';
 const ALLOWED_HOSTS = parseAllowedHosts(process.env.ALLOWED_HOSTS);
@@ -568,8 +571,14 @@ async function handler(req, res) {
     if (req.method === 'GET' && url.pathname === '/api/tokens') {
       const daysParam = url.searchParams.get('days');
       const days = daysParam === 'all' ? Infinity : Math.max(1, Math.min(3650, Number(daysParam) || 30));
-      const report = MOCK ? mockTokenReport(days) : getTokenReport(days);
-      return sendJson(res, 200, { ...report, today: localDayKey(), timeZone: localTimeZone() });
+      const report = MOCK ? mockTokenReport(days) : mergeReports(getTokenReport(days), otherUsage.getDays(days));
+      const prices = {};
+      for (const d of report.days) for (const m of d.models) {
+        if (m.name in prices) continue;
+        const p = priceFor(m.name);
+        if (p) prices[m.name] = { input: p.i, output: p.o, cacheRead: p.i * p.read, cacheWrite: p.i * 1.25 };
+      }
+      return sendJson(res, 200, { ...report, prices, today: localDayKey(), timeZone: localTimeZone() });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/history') {
@@ -825,6 +834,17 @@ function startTokenScan() {
       return [...seen];
     },
   });
+  // Codex and OpenCode history, read from their local files (no logins involved).
+  otherUsage.load(path.join(DATA_DIR, '.claude-usage-other-tokens.json'));
+  const round = () => {
+    const codexHomes = new Set();
+    for (const a of loadAccounts()) {
+      if (a.provider !== 'codex') continue;
+      try { codexHomes.add(fs.realpathSync(expandHome(a.configDir))); } catch { /* folder missing */ }
+    }
+    otherUsage.scanOnce({ codexHomes: [...codexHomes] }).catch(() => {}).finally(() => setTimeout(round, 60 * 1000).unref?.());
+  };
+  round();
 }
 
 function startDesktopSync() {

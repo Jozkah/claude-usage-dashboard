@@ -49,7 +49,7 @@ export type Point = [number, number];
 export type RangeKey = '6h' | '24h' | '7d';
 export type Level = 'good' | 'warn' | 'bad';
 
-export interface NamedShare { name: string; tokens: number; cost: number }
+export interface NamedShare { name: string; tokens: number; cost: number; requests?: number; input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
 export interface DayUsage {
   date: string;
   requests: number;
@@ -62,9 +62,13 @@ export interface DayUsage {
   total: number;
   cost: number;
   unpriced: number;
+  reasoning?: number;
   models: NamedShare[];
   projects: NamedShare[];
+  /** Per-client slice of this day (Claude Code, Codex, OpenCode...); the day itself is their sum. */
+  clients?: Record<string, Omit<DayUsage, 'date' | 'clients'>>;
 }
+export interface ModelPrice { input: number; output: number; cacheRead: number; cacheWrite: number }
 export interface TokenReport {
   scanning: boolean;
   ready: boolean;
@@ -72,6 +76,8 @@ export interface TokenReport {
   total: number;
   updatedAt: number;
   days: DayUsage[];
+  /** USD per million tokens for models with a known public price; others are absent. */
+  prices?: Record<string, ModelPrice>;
   /** Optional: the server's current calendar day (YYYY-MM-DD) and zone, when it reports them. */
   today?: string;
   timeZone?: string;
