@@ -8,3 +8,8 @@ test('only busy or waiting Claude sessions appear as active', () => {
   assert.equal(activeSessionState('idle'), null);
   assert.equal(activeSessionState(undefined), null);
 });
+
+test('status match ignores case', () => {
+  assert.equal(activeSessionState('Busy'), 'busy');
+  assert.equal(activeSessionState('WAITING'), 'waiting');
+});

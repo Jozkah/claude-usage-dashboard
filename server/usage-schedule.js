@@ -1,4 +1,6 @@
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Wait a little after a reset: the server may still report the old window at the exact instant. */
+export const RESET_GRACE_MS = 45 * 1000;
 
 export function nextReset(window, now, stale = false) {
   const at = Date.parse(window?.resetsAt || '');
@@ -8,11 +10,11 @@ export function nextReset(window, now, stale = false) {
   return { at: at + (Math.floor((now - at) / WEEK_MS) + 1) * WEEK_MS, estimated: true };
 }
 
-export function nextUsagePollAt(value, now) {
+export function nextUsagePollAt(value, now, graceMs = RESET_GRACE_MS) {
   if (!value || value.status !== 'ok' || !Array.isArray(value.windows)) return now;
   const limiting = value.windows.filter((window) => window.used >= 100);
   if (!limiting.length) return now;
   const resets = limiting.map((window) => nextReset(window, now, value.stale));
   if (resets.some((reset) => !reset)) return now;
-  return Math.max(...resets.map((reset) => reset.at));
+  return Math.max(...resets.map((reset) => reset.at)) + graceMs;
 }

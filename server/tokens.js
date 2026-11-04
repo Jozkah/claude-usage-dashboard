@@ -5,44 +5,32 @@
  * - Incremental: remembers how far into each file it has read, so only new lines are parsed.
  * - Costs are ESTIMATES at public API prices, not what a subscription actually charges.
  * - Only covers this computer. Phone and other PCs never write logs here.
+ * - Raw token counts are stored per day and per (model, project, price-affecting flags);
+ *   cost is computed when a report is built, so price changes need no rescan.
+ *   Bump STATE_VERSION when the stored layout changes: old state is dropped and logs are re-read once.
+ * - Days are bucketed in the server's local timezone. The timezone is stored with the state and
+ *   a change triggers one rescan.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { PRICING_VERSION, priceFor, costOf } from './pricing.js';
+import { priceFor, costOf, promptClass, promptOfClass } from './pricing.js';
 
-/* ---------------------------------- state ---------------------------------- */
-
-const state = { v: PRICING_VERSION, files: {}, days: {} };
-const progress = { scanning: false, ready: false, done: 0, total: 0, updatedAt: 0 };
-let stateFile = null;
-let dirty = false;
-
-function loadState(file) {
-  try {
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (j && j.v === PRICING_VERSION) {
-      state.files = j.files || {};
-      state.days = j.days || {};
-      progress.ready = true;
-      progress.updatedAt = j.updatedAt || 0;
-    }
-  } catch { /* first run */ }
-}
-
-function saveState() {
-  if (!stateFile || !dirty) return;
-  try {
-    const tmp = stateFile + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ ...state, updatedAt: progress.updatedAt }));
-    fs.renameSync(tmp, stateFile);
-    dirty = false;
-  } catch { /* best effort */ }
-}
+const STATE_VERSION = 4;
+const SEEN_LIMIT = 100000; // committed message keys kept for de-duplication across files
+const HEAD_BYTES = 64; // first bytes of a file remembered to detect a rewrite
+const currentTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
 
 const pad = (n) => String(n).padStart(2, '0');
 const dayKey = (ts) => {
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? null : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+/** First day of a `days`-long window ending today, by calendar (not 24h blocks, so DST-safe). */
+const cutoffKey = (days, now) => {
+  const d = new Date(now);
+  d.setDate(d.getDate() - (Math.max(1, days) - 1));
+  return dayKey(d);
 };
 
 function projectName(cwd) {
@@ -52,162 +40,295 @@ function projectName(cwd) {
   return (i > 0 ? p.slice(0, i) : p).split('/').filter(Boolean).pop() || 'unknown';
 }
 
-function bucket(day) {
-  return (state.days[day] ||= { in: 0, out: 0, cr: 0, cw: 0, cost: 0, unpriced: 0, models: {}, projects: {} });
+const priceMemo = new Map();
+function priceOf(model) {
+  if (!priceMemo.has(model)) priceMemo.set(model, priceFor(model));
+  return priceMemo.get(model);
 }
 
-function commit(r) {
-  const b = bucket(r.day);
-  const tok = r.in + r.out + r.cr + r.c5 + r.c1;
-  const cost = costOf(priceFor(r.model), r);
-  b.in += r.in; b.out += r.out; b.cr += r.cr; b.cw += r.c5 + r.c1;
-  b.cost += cost;
-  if (!priceFor(r.model)) b.unpriced += tok;
-  const m = (b.models[r.model] ||= { t: 0, c: 0 });
-  m.t += tok; m.c += cost;
-  const p = (b.projects[r.project] ||= { t: 0, c: 0 });
-  p.t += tok; p.c += cost;
-  dirty = true;
-}
+const hashKey = (id, requestId) => crypto.createHash('sha1').update(`${id}|${requestId || ''}`).digest('base64').slice(0, 16);
 
-/* A message is logged once per content block, all with the same message id. Keep the
-   last block's numbers (they are final) and commit when the id changes. */
-function ingest(line, f) {
-  if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
-  let j;
-  try { j = JSON.parse(line); } catch { return; }
-  const msg = j && j.message;
-  if (!j || j.type !== 'assistant' || !msg || !msg.usage) return;
-  const u = msg.usage;
-  const day = dayKey(j.timestamp);
-  if (!day) return;
-  const cc = u.cache_creation || {};
-  const c1 = Number(cc.ephemeral_1h_input_tokens) || 0;
-  const c5 = cc.ephemeral_5m_input_tokens != null
-    ? Number(cc.ephemeral_5m_input_tokens) || 0
-    : Math.max(0, (Number(u.cache_creation_input_tokens) || 0) - c1);
-  const rec = {
-    id: msg.id || j.requestId || j.uuid || null,
-    day,
-    model: msg.model || j.requestedModel || 'unknown',
-    project: projectName(j.cwd),
-    in: Number(u.input_tokens) || 0,
-    out: Number(u.output_tokens) || 0,
-    cr: Number(u.cache_read_input_tokens) || 0,
-    c5, c1,
-    speed: u.speed,
-    geo: u.inference_geo,
-    tier: u.service_tier,
-    search: Number(u.server_tool_use?.web_search_requests) || 0,
-  };
-  if (f.pending && rec.id && f.pending.id === rec.id) { f.pending = rec; return; }
-  if (f.pending) commit(f.pending);
-  f.pending = rec;
-}
+/** Key of one usage bucket: [model, project, speed, tier, geo, prompt-size class]. Values are [in,out,cr,c5,c1,search]. */
+const variantKey = (r) => JSON.stringify([r.model, r.project, r.speed || '', r.tier || '', r.geo || '', promptClass(r.in + r.cr + r.c5 + r.c1)]);
 
-/* --------------------------------- scanning --------------------------------- */
+export function createTokenStore({ chunkSize = 8 * 1024 * 1024 } = {}) {
+  const state = { v: STATE_VERSION, tz: currentTz(), files: {}, days: {} };
+  let seen = new Set();
+  const progress = { scanning: false, ready: false, done: 0, total: 0, updatedAt: 0 };
+  let stateFile = null;
+  let dirty = false;
+  let saving = null;
+  let running = false;
+  let buf = null;
+  const parsedKeys = new Map();
 
-function walk(dir, out) {
-  let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
-    else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
+  function load(file) {
+    stateFile = file;
+    try {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (j && j.v === STATE_VERSION && j.tz === state.tz) {
+        state.files = j.files || {};
+        state.days = j.days || {};
+        seen = new Set(Array.isArray(j.seen) ? j.seen : []);
+        progress.ready = true;
+        progress.updatedAt = j.updatedAt || 0;
+      }
+    } catch { /* first run */ }
   }
-}
 
-async function readNew(p, f, size) {
-  const fh = await fs.promises.open(p, 'r');
-  try {
-    const buf = Buffer.allocUnsafe(8 * 1024 * 1024);
-    let pos = f.offset;
-    let carry = Buffer.alloc(0);
-    while (pos < size) {
-      const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, size - pos), pos);
-      if (!bytesRead) break;
-      pos += bytesRead;
-      const data = carry.length ? Buffer.concat([carry, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead);
-      const nl = data.lastIndexOf(10);
-      if (nl === -1) { carry = Buffer.from(data); continue; }
-      const text = data.subarray(0, nl).toString('utf8');
-      carry = Buffer.from(data.subarray(nl + 1));
-      for (const line of text.split('\n')) ingest(line, f);
-      f.offset = pos - carry.length; // only ever advance to a line boundary
-    }
-  } finally {
-    await fh.close();
+  /** Async write so a big state does not block on disk; JSON.stringify itself is still synchronous. */
+  function save() {
+    if (!stateFile || !dirty || saving) return saving;
+    dirty = false;
+    let body;
+    try { body = JSON.stringify({ ...state, seen: [...seen], updatedAt: progress.updatedAt }); } catch { dirty = true; return null; }
+    const tmp = stateFile + '.tmp';
+    saving = fs.promises.writeFile(tmp, body)
+      .then(() => fs.promises.rename(tmp, stateFile))
+      .catch(() => { dirty = true; }) // best effort
+      .finally(() => { saving = null; });
+    return saving;
   }
-}
 
-let running = false;
+  function remember(key) {
+    seen.add(key);
+    if (seen.size > SEEN_LIMIT) seen.delete(seen.values().next().value);
+  }
 
-async function scanOnce(getRoots) {
-  if (running) return;
-  running = true;
-  try {
-    const files = [];
-    for (const root of getRoots()) walk(root, files);
-    const work = [];
-    for (const p of files) {
-      let st;
-      try { st = fs.statSync(p); } catch { continue; }
-      const f = (state.files[p] ||= { offset: 0, pending: null });
-      if (st.size < f.offset) { f.offset = st.size; f.pending = null; continue; } // rewritten file: don't double count
-      if (st.size > f.offset) work.push([p, f, st.size]);
+  function commit(r) {
+    if (r.key) {
+      if (seen.has(r.key)) return;
+      remember(r.key);
     }
-    progress.scanning = work.length > 0;
-    progress.done = 0;
-    progress.total = work.length;
-    let lastSave = Date.now();
-    for (const [p, f, size] of work) {
-      try { await readNew(p, f, size); } catch { /* file vanished or locked: try next round */ }
-      progress.done++;
-      progress.updatedAt = Date.now();
-      if (Date.now() - lastSave > 20000) { saveState(); lastSave = Date.now(); }
-      if (progress.done % 20 === 0) await new Promise((r) => setImmediate(r));
-    }
-    progress.scanning = false;
-    progress.ready = true;
-    progress.updatedAt = Date.now();
+    const day = (state.days[r.day] ||= { u: {} });
+    const c = (day.u[variantKey(r)] ||= [0, 0, 0, 0, 0, 0]);
+    c[0] += r.in; c[1] += r.out; c[2] += r.cr; c[3] += r.c5; c[4] += r.c1; c[5] += r.search || 0;
     dirty = true;
-    saveState();
-  } finally {
-    running = false;
   }
+
+  /* A message is logged once per content block, all with the same message id. Keep the
+     last block's numbers (they are final) and commit when the id changes. Ids already
+     committed (any file) are skipped, so resumed or copied sessions do not double count. */
+  function ingest(line, f) {
+    if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
+    let j;
+    try { j = JSON.parse(line); } catch { return; }
+    const msg = j && j.message;
+    if (!j || j.type !== 'assistant' || !msg || !msg.usage) return;
+    const u = msg.usage;
+    const day = dayKey(j.timestamp);
+    if (!day) return;
+    const model = msg.model || j.requestedModel || 'unknown';
+    if (model === '<synthetic>') return;
+    const cc = u.cache_creation || {};
+    const c1 = Number(cc.ephemeral_1h_input_tokens) || 0;
+    const c5 = cc.ephemeral_5m_input_tokens != null
+      ? Number(cc.ephemeral_5m_input_tokens) || 0
+      : Math.max(0, (Number(u.cache_creation_input_tokens) || 0) - c1);
+    const rec = {
+      key: msg.id ? hashKey(msg.id, j.requestId) : null,
+      day,
+      model,
+      project: projectName(j.cwd),
+      in: Number(u.input_tokens) || 0,
+      out: Number(u.output_tokens) || 0,
+      cr: Number(u.cache_read_input_tokens) || 0,
+      c5, c1,
+      speed: u.speed,
+      geo: u.inference_geo,
+      tier: u.service_tier,
+      search: Number(u.server_tool_use?.web_search_requests) || 0,
+    };
+    if (!rec.in && !rec.out && !rec.cr && !rec.c5 && !rec.c1 && !rec.search) return;
+    if (f.pending && rec.key && f.pending.key === rec.key) { f.pending = rec; return; }
+    if (rec.key && seen.has(rec.key)) return;
+    if (f.pending) commit(f.pending);
+    f.pending = rec;
+  }
+
+  /* -------------------------------- scanning -------------------------------- */
+
+  function walk(dir, out) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p, out);
+      else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
+    }
+  }
+
+  /** File was replaced or shrunk: keep what was pending, then re-read from the start (ids de-duplicate). */
+  function resetFile(f) {
+    if (f.pending) commit(f.pending);
+    f.pending = null; f.offset = 0; f.head = '';
+    dirty = true;
+  }
+
+  async function refreshHead(fh, f) {
+    const want = Math.min(HEAD_BYTES, f.offset);
+    if (want <= 0 || (f.head && Buffer.from(f.head, 'base64').length >= want)) return;
+    const b = Buffer.alloc(want);
+    const { bytesRead } = await fh.read(b, 0, want, 0);
+    f.head = b.subarray(0, bytesRead).toString('base64');
+  }
+
+  async function readNew(p, f, st) {
+    const fh = await fs.promises.open(p, 'r');
+    try {
+      const size = st.size;
+      if (size < f.offset) resetFile(f);
+      else if (f.offset > 0 && f.head) {
+        const want = Buffer.from(f.head, 'base64');
+        const got = Buffer.alloc(want.length);
+        const { bytesRead } = await fh.read(got, 0, want.length, 0);
+        if (bytesRead !== want.length || !got.equals(want)) resetFile(f);
+      }
+      buf ||= Buffer.allocUnsafe(chunkSize); // one reusable buffer
+      let pos = f.offset;
+      let carry = Buffer.alloc(0);
+      while (pos < size) {
+        const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, size - pos), pos);
+        if (!bytesRead) break;
+        pos += bytesRead;
+        const data = carry.length ? Buffer.concat([carry, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead);
+        const nl = data.lastIndexOf(10);
+        if (nl === -1) { carry = Buffer.from(data); continue; }
+        const text = data.subarray(0, nl).toString('utf8');
+        carry = Buffer.from(data.subarray(nl + 1));
+        for (const line of text.split('\n')) ingest(line, f);
+        f.offset = pos - carry.length; // only ever advance to a line boundary
+      }
+      await refreshHead(fh, f);
+      f.mtime = st.mtimeMs;
+      dirty = true;
+    } finally {
+      await fh.close();
+    }
+  }
+
+  async function scanOnce(getRoots) {
+    if (running) return;
+    running = true;
+    try {
+      const files = [];
+      for (const root of getRoots()) walk(root, files);
+      if (files.length) { // forget logs that were deleted; their day totals stay
+        const present = new Set(files);
+        for (const p of Object.keys(state.files)) {
+          if (present.has(p)) continue;
+          if (state.files[p].pending) commit(state.files[p].pending);
+          delete state.files[p];
+          dirty = true;
+        }
+      }
+      const work = [];
+      for (const p of files) {
+        let st;
+        try { st = fs.statSync(p); } catch { continue; }
+        const f = (state.files[p] ||= { offset: 0, pending: null });
+        if (st.size !== f.offset || (f.mtime !== undefined && st.mtimeMs !== f.mtime)) work.push([p, f, st]);
+      }
+      progress.scanning = work.length > 0;
+      progress.done = 0;
+      progress.total = work.length;
+      let lastSave = Date.now();
+      for (const [p, f, st] of work) {
+        try { await readNew(p, f, st); } catch { /* file vanished or locked: try next round */ }
+        progress.done++;
+        progress.updatedAt = Date.now();
+        if (Date.now() - lastSave > 20000) { save(); lastSave = Date.now(); }
+        if (progress.done % 20 === 0) await new Promise((r) => setImmediate(r));
+      }
+      progress.scanning = false;
+      progress.ready = true;
+      progress.updatedAt = Date.now();
+      dirty = true;
+      if (saving) await saving;
+      await save();
+    } finally {
+      running = false;
+    }
+  }
+
+  /* -------------------------------- reporting -------------------------------- */
+
+  const parseKey = (k) => {
+    let v = parsedKeys.get(k);
+    if (!v) { v = JSON.parse(k); parsedKeys.set(k, v); }
+    return v;
+  };
+
+  function addUsage(a, k, c) {
+    const [model, project, speed, tier, geo, pc] = parseKey(k);
+    const price = priceOf(model);
+    const cost = costOf(price, { in: c[0], out: c[1], cr: c[2], c5: c[3], c1: c[4], search: c[5], speed, tier, geo, prompt: promptOfClass(pc) });
+    const tok = c[0] + c[1] + c[2] + c[3] + c[4];
+    a.input += c[0]; a.output += c[1]; a.cacheRead += c[2]; a.cacheWrite += c[3] + c[4];
+    a.cost += cost;
+    if (!price) a.unpriced += tok;
+    const m = (a.models[model] ||= { t: 0, c: 0 });
+    m.t += tok; m.c += cost;
+    const pr = (a.projects[project] ||= { t: 0, c: 0 });
+    pr.t += tok; pr.c += cost;
+  }
+
+  const top = (map) => Object.entries(map)
+    .map(([name, v]) => ({ name, tokens: v.t, cost: v.c }))
+    .sort((a, b) => b.tokens - a.tokens);
+
+  function getReport(days = 30, now = Date.now()) {
+    const cutoff = cutoffKey(days, now);
+    const aggs = new Map();
+    const agg = (day) => {
+      if (!aggs.has(day)) aggs.set(day, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0, models: {}, projects: {} });
+      return aggs.get(day);
+    };
+    for (const [day, b] of Object.entries(state.days)) {
+      if (day < cutoff) continue;
+      for (const [k, c] of Object.entries(b.u || {})) addUsage(agg(day), k, c);
+    }
+    // each file's latest message is not committed yet: include it virtually, state stays untouched
+    const counted = new Set();
+    for (const f of Object.values(state.files)) {
+      const r = f.pending;
+      if (!r || r.day < cutoff) continue;
+      if (r.key) {
+        if (seen.has(r.key) || counted.has(r.key)) continue;
+        counted.add(r.key);
+      }
+      addUsage(agg(r.day), variantKey(r), [r.in, r.out, r.cr, r.c5, r.c1, r.search || 0]);
+    }
+    const out = [...aggs.entries()]
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([date, a]) => ({
+        date,
+        input: a.input, output: a.output, cacheRead: a.cacheRead, cacheWrite: a.cacheWrite,
+        total: a.input + a.output + a.cacheRead + a.cacheWrite,
+        cost: a.cost,
+        unpriced: a.unpriced,
+        models: top(a.models),
+        projects: top(a.projects),
+      }));
+    return { ...progress, days: out };
+  }
+
+  return { state, progress, ingest, scanOnce, load, save, getReport };
 }
+
+/* ------------------------------- default scanner ------------------------------- */
+
+const store = createTokenStore();
 
 /** getRoots() returns the project folders to read (called every round, so added accounts are picked up). */
 export function startTokenScanner({ getRoots, file }) {
-  stateFile = file;
-  loadState(file);
-  const round = () => { scanOnce(getRoots).catch(() => {}).finally(() => setTimeout(round, 60 * 1000).unref?.()); };
+  store.load(file);
+  const round = () => { store.scanOnce(getRoots).catch(() => {}).finally(() => setTimeout(round, 60 * 1000).unref?.()); };
   round();
 }
 
-/* --------------------------------- reporting --------------------------------- */
-
-function top(map) {
-  return Object.entries(map)
-    .map(([name, v]) => ({ name, tokens: v.t, cost: v.c }))
-    .sort((a, b) => b.tokens - a.tokens);
-}
-
-export function getTokenReport(days = 30) {
-  const cutoff = dayKey(Date.now() - (days - 1) * 864e5);
-  const out = Object.entries(state.days)
-    .filter(([d]) => d >= cutoff)
-    .sort(([a], [b]) => (a < b ? 1 : -1))
-    .map(([date, b]) => ({
-      date,
-      input: b.in, output: b.out, cacheRead: b.cr, cacheWrite: b.cw,
-      total: b.in + b.out + b.cr + b.cw,
-      cost: b.cost,
-      unpriced: b.unpriced,
-      models: top(b.models),
-      projects: top(b.projects),
-    }));
-  return { ...progress, days: out };
+export function getTokenReport(days = 30, now = Date.now()) {
+  return store.getReport(days, now);
 }
 
 /* ----------------------------------- mock ----------------------------------- */
@@ -215,7 +336,9 @@ export function getTokenReport(days = 30) {
 export function mockTokenReport(days = 30) {
   const out = [];
   for (let i = 0; i < days; i++) {
-    const date = dayKey(Date.now() - i * 864e5);
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const date = dayKey(d);
     const k = 0.4 + 0.6 * Math.abs(Math.sin(i * 1.7));
     const total = Math.round(k * 2.4e9);
     out.push({

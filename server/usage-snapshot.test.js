@@ -59,3 +59,75 @@ test('recovers last readings from existing history when no snapshot exists', () 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('seeded snapshot honours the supplied plan and flags unknown plan', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-usage-seed-'));
+  try {
+    const file = path.join(dir, 'latest.json');
+    const history = { five_hour: [[1000, 15]], seven_day: [[1500, 49]] };
+    const labels = { five_hour: '5-hour session', seven_day: 'Weekly' };
+    const max = { id: 'max', configDir: '~/.m' };
+    const other = { id: 'other', configDir: '~/.o' };
+    const snapshots = createUsageSnapshot(file);
+    snapshots.seedFromHistory(max, history, labels, 'Max 5x');
+    snapshots.seedFromHistory(other, history, labels);
+    const again = createUsageSnapshot(file);
+    assert.deepEqual(again.peek(max).windows.map((w) => w.key), ['seven_day']);
+    assert.equal(again.peek(max).planUnknown, undefined);
+    assert.deepEqual(again.fallback(max, { status: 'error' }).windows.map((w) => w.key), ['seven_day']);
+    assert.equal(again.peek(other).planUnknown, true);
+    assert.equal(again.peek(other).windows.length, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cached windows past their reset time are flagged expired', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-usage-expired-'));
+  try {
+    const file = path.join(dir, 'latest.json');
+    const account = { id: 'a', configDir: '~/.a' };
+    const windows = [
+      { key: 'five_hour', used: 100, resetsAt: '2026-10-12T15:00:00Z' },
+      { key: 'seven_day', used: 40, resetsAt: '2026-10-20T00:00:00Z' },
+      { key: 'x', used: 1, resetsAt: null },
+    ];
+    createUsageSnapshot(file).remember(account, { status: 'ok', fetchedAt: 1, plan: 'Pro', windows });
+    const at = Date.parse('2026-10-15T00:00:00Z');
+    const snapshots = createUsageSnapshot(file, { now: () => at });
+    assert.deepEqual(snapshots.peek(account).windows.map((w) => w.expired), [true, undefined, undefined]);
+    assert.deepEqual(snapshots.fallback(account, { status: 'error' }).windows.map((w) => w.expired), [true, undefined, undefined]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('forget, remember guards, deferUntil no-op, corrupt files and configDir mismatch', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-usage-misc-'));
+  try {
+    const file = path.join(dir, 'latest.json');
+    const account = { id: 'a', configDir: '~/.a' };
+    const ok = { status: 'ok', fetchedAt: 1, windows: [{ key: 'seven_day', used: 1, resetsAt: null }] };
+    const s = createUsageSnapshot(file);
+    s.remember(account, { ...ok, status: 'error' });
+    s.remember(account, { ...ok, windows: [] });
+    s.remember(account, { ...ok, windows: undefined });
+    assert.equal(s.peek(account), null);
+    assert.equal(fs.existsSync(file), false);
+    s.remember(account, ok);
+    assert.equal(s.peek({ ...account, configDir: '~/.b' }), null);
+    s.deferUntil(account, 5);
+    const mtime = fs.statSync(file).mtimeMs;
+    s.deferUntil(account, 5);
+    assert.equal(fs.statSync(file).mtimeMs, mtime);
+    s.forget(account.id);
+    s.forget('missing');
+    assert.equal(createUsageSnapshot(file).peek(account), null);
+    fs.writeFileSync(file, '[1,2]');
+    assert.equal(createUsageSnapshot(file).peek(account), null);
+    fs.writeFileSync(file, '{not json');
+    assert.equal(createUsageSnapshot(file).peek(account), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

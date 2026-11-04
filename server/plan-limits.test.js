@@ -12,3 +12,14 @@ test('removes five-hour window from Max 5x and Max 20x only', () => {
   }
   assert.deepEqual(windows, [{ key: 'five_hour' }, { key: 'seven_day' }]);
 });
+
+test('tolerates odd input and plan spelling', () => {
+  const windows = [{ key: 'five_hour' }, { key: 'seven_day' }];
+  assert.equal(visibleUsageWindows('Max 5x', undefined), undefined);
+  assert.equal(visibleUsageWindows('Max 5x', null), null);
+  for (const plan of ['max 5x', '  MAX 20X ', 'Max  5x']) {
+    assert.deepEqual(visibleUsageWindows(plan, windows), [{ key: 'seven_day' }], plan);
+  }
+  // only the documented Max tiers hide the five-hour window
+  assert.deepEqual(visibleUsageWindows('Max 10x', windows), windows);
+});
