@@ -96,7 +96,7 @@ test('reads the checked-out branch without git, including linked worktrees', () 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('reports a clear error when the Packages folder is missing', () => {
+test('reports a clear error when the Packages folder is missing', { skip: process.platform !== 'win32' && 'Claude Desktop profiles exist on Windows only' }, () => {
   const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-no-packages-'));
   try {
     assert.throws(() => findWindowsDesktopProfiles(local), /packages folder not found/);
@@ -181,7 +181,7 @@ test('closed Work profile follows Personal archive state and newer turns', () =>
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('discovers migrated Personal profile and existing Work profile', () => {
+test('discovers migrated Personal profile and existing Work profile', { skip: process.platform !== 'win32' && 'Claude Desktop profiles exist on Windows only' }, () => {
   const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-profile-paths-'));
   try {
     const root = path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache');
@@ -194,7 +194,7 @@ test('discovers migrated Personal profile and existing Work profile', () => {
   } finally { fs.rmSync(local, { recursive: true, force: true }); }
 });
 
-test('discovers additional isolated Desktop profiles', () => {
+test('discovers additional isolated Desktop profiles', { skip: process.platform !== 'win32' && 'Claude Desktop profiles exist on Windows only' }, () => {
   const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-extra-profile-'));
   try {
     const root = path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache');

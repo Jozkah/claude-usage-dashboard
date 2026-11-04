@@ -82,7 +82,8 @@ export function createCodexSessionReader({ now = Date.now } = {}) {
         let folder = null;
         try {
           const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(readSlice(file, 0, Math.min(size, HEAD_BYTES)))?.[1];
-          if (cwd) folder = path.basename(JSON.parse(`"${cwd}"`).replace(/[\\/]+$/, '')) || null;
+          // Split on both separators: a Windows path may be read on Linux (Docker), where path.basename keeps it whole.
+          if (cwd) folder = JSON.parse(`"${cwd}"`).split(/[\\/]+/).filter(Boolean).pop() ?? null;
         } catch { /* leave null */ }
         folders.set(file, folder);
       }
