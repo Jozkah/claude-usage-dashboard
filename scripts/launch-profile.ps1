@@ -3,7 +3,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $logDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'data'
+function Write-LaunchLog([string]$message) {
+  try {
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    Add-Content -LiteralPath (Join-Path $logDir 'launcher.log') -Value "$(Get-Date -Format o) [$Name] $message"
+  } catch { }
+}
 try {
+  # One launcher per profile at a time: clicking again while the first run is still copying must not pile up.
+  $created = $false
+  $mutex = [System.Threading.Mutex]::new($true, "Local\ClaudeProfileLaunch$Name", [ref]$created)
+  if (-not $created) { Write-LaunchLog 'Another launch for this profile is still running; ignoring this click.'; $mutex.Dispose(); exit 0 }
   # Claude Code config dir for this profile (also set by claude-work.cmd for its CLI half).
   $configDir = Join-Path $env:USERPROFILE ('.claude-' + $Name.ToLowerInvariant())
   if ($Name -ne 'Work') {
@@ -24,13 +34,16 @@ try {
   $portableExe = Join-Path $portable 'Claude.exe'
   $marker = Join-Path $portable '.complete'
   if (-not ((Test-Path -LiteralPath $portableExe) -and (Test-Path -LiteralPath $marker))) {
+    Write-LaunchLog "Preparing a separate copy of Claude Desktop $($package.Version) (first launch after an update takes a minute or two)."
     if (Test-Path -LiteralPath $portable) { Remove-Item -LiteralPath $portable -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $portable | Out-Null
-    & robocopy $source $portable /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    # /MT:4 keeps the copy quick without taking every core
+    & robocopy $source $portable /E /MT:4 /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
     if ($LASTEXITCODE -gt 7 -or -not (Test-Path -LiteralPath $portableExe)) {
       throw "Could not prepare portable Claude Desktop ($LASTEXITCODE)."
     }
     Set-Content -LiteralPath $marker -Value (Get-Date -Format o)
+    Write-LaunchLog 'Copy finished.'
     # Drop copies of older Claude versions.
     Get-ChildItem -LiteralPath $portableRoot -Directory | Where-Object { $_.FullName -ne $portable } |
       ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
@@ -42,6 +55,7 @@ try {
     if (Test-Path -LiteralPath (Join-Path $legacy 'claude-code-sessions')) { $userDataDir = $legacy }
   }
   New-Item -ItemType Directory -Force -Path $userDataDir | Out-Null
+  $mutex.ReleaseMutex()
   Start-Process -FilePath $portableExe -WorkingDirectory $portable `
     -ArgumentList ('--user-data-dir=' + [char]34 + $userDataDir + [char]34)
 } catch {
