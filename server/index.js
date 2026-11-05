@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { startTokenScanner, getTokenReport, mockTokenReport } from './tokens.js';
 import { createOtherUsageStore, mergeReports } from './other-usage.js';
 import { priceFor } from './pricing.js';
+import { linkScratchWorkspaces } from './scratch-links.js';
 import { createUsageSnapshot } from './usage-snapshot.js';
 import { visibleUsageWindows } from './plan-limits.js';
 import { nextUsagePollAt } from './usage-schedule.js';
@@ -854,6 +855,8 @@ function startDesktopSync() {
       const profiles = findWindowsDesktopProfiles();
       const result = syncDesktopSessionRecordsMany(profiles,
         { minAgeMs: 2000, inspectConflicts: false });
+      const scratch = linkScratchWorkspaces(profiles);
+      if (scratch.linked || scratch.created) console.log(`Desktop scratch folders: ${scratch.linked} linked, ${scratch.created} created`);
       const copied = { ...desktopSyncStatus.copied };
       for (const [id, count] of Object.entries(result.copied)) copied[id] = (copied[id] || 0) + count;
       desktopSyncStatus = { ...desktopSyncStatus, enabled: true, lastRun: Date.now(), lastError: null,
