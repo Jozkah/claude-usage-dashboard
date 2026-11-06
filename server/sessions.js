@@ -33,6 +33,7 @@ export function createSessionReader({ inContainer = false, ttlMs = 3000, staleMs
         const live = inContainer ? age < containerStaleMs : age < staleMs && alive(Number(j.pid));
         if (!live) return;
         out.push({
+          pid: Number(j.pid),
           id: String(j.sessionId || j.pid),
           name: String(j.name || '').slice(0, 80) || null,
           folder: String(j.cwd || '').split(/[\\/]/).filter(Boolean).pop() || null,

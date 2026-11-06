@@ -38,6 +38,7 @@ import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, stream
 import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sanitizeHistory, historyPoints,
   credentialsExpired, desktopProfileFor } from './account-utils.js';
 import { createSessionReader } from './sessions.js';
+import { routeDesktopSessions } from './session-owner.js';
 import { readCredentials, refreshCredentials } from './credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,30 @@ function desktopProfileState(profiles = findWindowsDesktopProfiles()) {
 async function desktopRunning() {
   const state = await desktopProfileState();
   return Object.values(state).some(Boolean);
+}
+
+let claudeProcesses = { at: 0, value: [], pending: null };
+function claudeProcessTree() {
+  if (claudeProcesses.pending) return claudeProcesses.pending;
+  if (Date.now() - claudeProcesses.at < 10_000) return Promise.resolve(claudeProcesses.value);
+  const script = '@(Get-CimInstance Win32_Process -Filter "Name = \'Claude.exe\'" | ' +
+    'Select-Object ProcessId,ParentProcessId,ExecutablePath,@{Name="CommandLine";Expression={ ' +
+    'if ($_.CommandLine -match "--user-data-dir" -and $_.CommandLine -notmatch "--type=") { $_.CommandLine } else { "" } }}) | ConvertTo-Json -Compress';
+  claudeProcesses.pending = new Promise((resolve) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', timeout: 10000, windowsHide: true }, (error, stdout) => {
+        let processes = [];
+        try {
+          if (!error && String(stdout).trim()) {
+            const parsed = JSON.parse(stdout);
+            processes = Array.isArray(parsed) ? parsed : [parsed];
+          }
+        } catch { /* keep sessions in their original folders when process lookup fails */ }
+        claudeProcesses = { at: Date.now(), value: processes, pending: null };
+        resolve(processes);
+      });
+  });
+  return claudeProcesses.pending;
 }
 
 const loginStartedAt = new Map(); // accountId -> ms of last sign-in launch
@@ -563,7 +588,12 @@ async function handler(req, res) {
       const accounts = loadAccounts();
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
       // sessions: async, cached 3 s per config folder; usage is cached longer
-      const sessionLists = MOCK ? [] : await Promise.all(accounts.map(safeSessions));
+      let sessionLists = MOCK ? [] : await Promise.all(accounts.map(safeSessions));
+      if (process.platform === 'win32' && !MOCK && sessionLists.some((list) => list.some((session) => session.pid))) {
+        try { sessionLists = routeDesktopSessions(accounts, sessionLists, findWindowsDesktopProfiles(), await claudeProcessTree()); }
+        catch { sessionLists = routeDesktopSessions(accounts, sessionLists, {}, []); }
+      }
+      sessionLists = sessionLists.map((list) => list.map(({ pid, ...session }) => session));
       const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
         sessions: MOCK ? [] : sessionLists[i] }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
