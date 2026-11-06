@@ -703,7 +703,7 @@ async function handler(req, res) {
       try {
         if (await desktopRunning()) return sendJson(res, 409, { error: 'Fully quit every Claude Desktop instance, including tray icons, then retry.' });
         const profiles = findWindowsDesktopProfiles();
-        const result = await syncMergedDesktopLabelsMany(profiles);
+        const result = await syncMergedDesktopLabelsMany(profiles, { sourceId: 'personal' });
         labelSyncStatus = { ...labelSyncStatus, lastRun: Date.now(), lastError: null, skippedScopes: result.skippedScopes || [] };
         return sendJson(res, 200, { ...result, skippedScopes: result.skippedScopes || [] });
       } catch (error) {
@@ -906,7 +906,7 @@ function startDesktopSync() {
         const targets = ids.filter((id) => !running[id] && profileClosedChecks[id] >= 2);
         if (targets.length) {
           labelSyncBusy = true;
-          const result = await syncMergedDesktopLabelsMany(profiles, { targetIds: targets });
+          const result = await syncMergedDesktopLabelsMany(profiles, { targetIds: targets, sourceId: 'personal' });
           labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: true, skippedScopes: result.skippedScopes || [] };
           if (result.updated) console.log(`Desktop labels: synced ${targets.join(', ')}`);
         } else labelSyncStatus = { ...labelSyncStatus, waiting: true };
@@ -914,7 +914,7 @@ function startDesktopSync() {
       }
       if (++closedChecks < 2 || syncedDuringClosure) return;
       labelSyncBusy = true;
-      const result = await syncMergedDesktopLabelsMany(profiles);
+      const result = await syncMergedDesktopLabelsMany(profiles, { sourceId: 'personal' });
       labelSyncStatus = { enabled: true, lastRun: Date.now(), lastError: null, waiting: false, skippedScopes: result.skippedScopes || [] };
       if (!Object.values(await desktopProfileState(profiles)).some(Boolean)) syncedDuringClosure = true;
       if (result.conflicts?.length) console.warn(`Desktop labels: ${result.conflicts.length} assignment conflict(s); first profile wins`);

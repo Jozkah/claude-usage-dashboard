@@ -218,7 +218,7 @@ function writeWithBackup(filename, value, stateDir) {
 
 // Picks one title per chat. The pointer file mtime is a poor rename signal, so the last
 // synced title is persisted: a profile whose title differs from it was renamed since.
-function syncDesktopTitles(profiles, targets = profiles, stateDir) {
+function syncDesktopTitles(profiles, targets = profiles, stateDir, sourceProfileId = null) {
   let titles = 0;
   const targetFiles = new Set(targets.flatMap((profile) => [...profile.records.values()].map((record) => record.filename)));
   const state = loadState(stateDir, 'label-titles', {});
@@ -241,7 +241,11 @@ function syncDesktopTitles(profiles, targets = profiles, stateDir) {
     const last = state[id];
     const renamed = last === undefined ? [] : named.filter((record) => record.value.title !== last);
     const candidates = renamed.length ? renamed : named;
-    const newest = [...candidates].sort((a, b) => b.mtime - a.mtime)[0];
+    const sourceRecords = sourceProfileId
+      ? profiles.filter((profile) => profile.profileId === sourceProfileId)
+        .flatMap((profile) => [...profile.records.values()]).filter((record) => named.includes(record))
+      : [];
+    const newest = [...(sourceRecords.length ? sourceRecords : candidates)].sort((a, b) => b.mtime - a.mtime)[0];
     let allUpdated = true;
     for (const record of peers) {
       if (record.value.title === newest.value.title) continue;
@@ -265,8 +269,8 @@ export async function syncMergedDesktopLabels(personalProfile, workProfile, { ta
   });
 }
 
-/** @param {Record<string, string>} profiles @param {{ targetIds?: string[], stateDir?: string }} [options] */
-export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object.keys(profiles), stateDir } = {}) {
+/** @param {Record<string, string>} profiles @param {{ targetIds?: string[], stateDir?: string, sourceId?: string }} [options] */
+export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object.keys(profiles), stateDir, sourceId } = {}) {
   const ids = Object.keys(profiles);
   if (ids.length < 2 || targetIds.some((id) => !Object.hasOwn(profiles, id))) {
     throw new Error('Choose at least two Desktop profiles and valid target IDs.');
@@ -276,10 +280,14 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
   const pids = participants.map((participant) => participant.id);
   const baselines = loadState(stateDir, 'label-baselines', {});
   const baselineKey = [...pids].sort().join('|');
-  const merged = mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
-    { baseline: baselines[baselineKey] || null, ids: pids });
+  const source = sourceId && participants.find((participant) => participant.profileId === sourceId);
+  if (sourceId && !source) throw new Error(`Source Desktop profile not found: ${sourceId}`);
+  const merged = source
+    ? { ...snapshotOf(source), conflicts: [] }
+    : mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
+      { baseline: baselines[baselineKey] || null, ids: pids });
   const targets = participants.filter((participant) => targetIds.includes(participant.profileId));
-  const titles = syncDesktopTitles(participants, targets, stateDir);
+  const titles = syncDesktopTitles(participants, targets, stateDir, sourceId);
   let updated = 0;
   const failures = [];
   const skippedScopes = [];

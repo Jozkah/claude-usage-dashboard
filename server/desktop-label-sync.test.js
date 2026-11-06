@@ -179,6 +179,27 @@ async function makeProfile(root, name, { owner = `${name}-scope`, chats = ['a'],
   return profile;
 }
 
+test('Personal controls group assignments and titles across three profiles', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-personal-labels-'));
+  try {
+    const group = { id: 'personal-group', name: 'Personal project' };
+    const personal = await makeProfile(root, 'personal', { groups: [group], assignments: { 'code:local_a': group.id } });
+    const work = await makeProfile(root, 'work', { groups: [{ id: 'work-group', name: 'Other' }], assignments: { 'code:local_a': 'work-group' } });
+    const third = await makeProfile(root, 'third');
+    const titleFile = (profile) => path.join(profile, 'claude-code-sessions', `${path.basename(profile)}-scope`, 'device', 'local_a.json');
+    fs.writeFileSync(titleFile(personal), JSON.stringify({ sessionId: 'local_a', title: 'Personal title' }));
+    fs.writeFileSync(titleFile(work), JSON.stringify({ sessionId: 'local_a', title: 'Work title' }));
+    fs.utimesSync(titleFile(work), new Date('2030-01-01'), new Date('2030-01-01'));
+    await syncMergedDesktopLabelsMany({ personal, work, third }, { targetIds: ['work', 'third'], sourceId: 'personal', stateDir });
+    for (const profile of [work, third]) {
+      const snapshot = desktopLabelSnapshot(profile);
+      assert.deepEqual(snapshot.groups, [group]);
+      assert.deepEqual(snapshot.assignments, [['code:local_a', group.id]]);
+      assert.equal(JSON.parse(fs.readFileSync(titleFile(profile), 'utf8')).title, 'Personal title');
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('encodes non-Latin-1 text and emoji round trip', () => {
   for (const text of ['plain', 'café', '你好', 'rocket 🚀']) {
     assert.equal(decodeLocalStorageValue(encodeLocalStorageValue(text)), text);
