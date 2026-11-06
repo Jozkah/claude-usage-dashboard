@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.67.0",
     "motion": "^11.15.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
