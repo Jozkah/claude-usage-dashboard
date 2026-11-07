@@ -44,6 +44,7 @@ export function routeDesktopSessions(accounts, lists, profiles, processes) {
       else if (routed[target][existing].lastActiveAt < publicSession.lastActiveAt) routed[target][existing] = publicSession;
     }
   });
-  for (const list of routed) list.sort((a, b) => Number(b.working) - Number(a.working) || b.lastActiveAt - a.lastActiveAt);
+  const priority = (session) => session.state === 'paused' ? 2 : session.working ? 1 : 0;
+  for (const list of routed) list.sort((a, b) => priority(b) - priority(a) || b.lastActiveAt - a.lastActiveAt);
   return routed;
 }

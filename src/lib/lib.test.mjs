@@ -147,6 +147,8 @@ test('isIdle only for readable accounts with zero usage and no chat running', ()
 import { planTier } from './plan.ts';
 test('planTier maps Claude and Codex plan names to colour tiers', () => {
   assert.equal(planTier('Max 20x'), 'max20');
+  assert.equal(planTier('Ultra (x20)'), 'max20');
+  assert.equal(planTier('Max (x5)'), 'max5');
   assert.equal(planTier('Max 5x'), 'max5');
   assert.equal(planTier('Team'), 'team');
   assert.equal(planTier('Pro'), 'pro');

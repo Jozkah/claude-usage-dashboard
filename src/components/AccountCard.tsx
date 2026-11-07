@@ -52,22 +52,23 @@ function Chats({ a }: { a: Account }) {
   const list = a.sessions ?? [];
   const working = list.filter((s) => s.working).length;
   const waiting = list.filter((s) => s.state === 'waiting').length;
+  const paused = list.filter((s) => s.state === 'paused').length;
   const shown = list.slice(0, 4);
   return (
     <div className="mt-3 h-[160px] overflow-hidden rounded-lg border border-line bg-frame/50 px-3 py-2.5">
       <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium">
         <span>Chats</span>
         <span className="text-muted-fg tabular-nums">
-          {working > 0 ? `${working} working` : ''}{working && waiting ? ' · ' : ''}{waiting > 0 ? `${waiting} waiting` : ''}{!working && !waiting ? '0 active' : ''}
+          {working > 0 ? `${working} working` : ''}{working && waiting ? ' · ' : ''}{waiting > 0 ? `${waiting} waiting` : ''}{(working || waiting) && paused ? ' · ' : ''}{paused > 0 ? `${paused} limit paused` : ''}{!working && !waiting && !paused ? '0 active' : ''}
         </span>
       </div>
       <ul className="flex flex-col gap-1 overflow-hidden">
         {shown.map((s) => (
           <li key={s.id} className="flex min-w-0 items-center gap-2 text-[12.5px]">
-            <span title={s.state === 'waiting' ? 'Waiting' : 'Working'} className={`block size-[7px] shrink-0 rounded-full ${s.state === 'waiting' ? 'bg-warn' : 'bg-good'}`} />
+            <span title={s.state === 'paused' ? '5-hour limit reached' : s.state === 'waiting' ? 'Waiting' : 'Working'} className={`block size-[7px] shrink-0 rounded-full ${s.state === 'paused' ? 'bg-bad' : s.state === 'waiting' ? 'bg-warn' : 'bg-good'}`} />
             <span className="min-w-0 flex-1 truncate">{s.name || s.folder || 'Untitled chat'}</span>
             <span className="ml-auto shrink-0 text-[11.5px] text-subtle-fg tabular-nums">
-              {s.state === 'waiting' ? 'waiting' : 'working'}
+              {s.state === 'paused' ? 'limit paused' : s.state === 'waiting' ? 'waiting' : 'working'}
             </span>
           </li>
         ))}

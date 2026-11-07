@@ -1,10 +1,11 @@
 /** Plan tiers and the colour each one gets, so a card's plan is recognisable at a glance. */
 export type PlanTier = 'free' | 'pro' | 'plus' | 'max5' | 'max20' | 'max' | 'team' | 'business' | 'unknown';
 
-/** "Max 20x" -> max20, "Codex Plus" -> plus, "Team" -> team. Codex plans share the Claude tier colours. */
+/** "Ultra (x20)" -> max20, "Codex Plus" -> plus, "Team" -> team. Codex plans share the Claude tier colours. */
 export function planTier(plan: string | null | undefined): PlanTier {
   const p = String(plan ?? '').toLowerCase().replace(/^codex\s+/, '').trim();
   if (!p) return 'unknown';
+  if (p.startsWith('ultra')) return 'max20';
   if (p.startsWith('max')) return /20/.test(p) ? 'max20' : /5/.test(p) ? 'max5' : 'max';
   if (p === 'free') return 'free';
   if (p === 'pro') return 'pro';

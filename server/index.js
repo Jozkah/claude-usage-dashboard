@@ -39,6 +39,7 @@ import { slug, expandHome, normalizeAccounts, uniqueIds, validateConfigDir, sani
   credentialsExpired, desktopProfileFor } from './account-utils.js';
 import { createSessionReader } from './sessions.js';
 import { routeDesktopSessions } from './session-owner.js';
+import { createDesktopLimitReader } from './desktop-limit-events.js';
 import { readCredentials, refreshCredentials } from './credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -227,10 +228,15 @@ function saveAccounts(accounts) {
 function planLabel(c) {
   const t = String(c.subscriptionType || '').toLowerCase();
   if (!t) return null;
-  let name = cap(t);
   const m = String(c.rateLimitTier || '').match(/(\d+)x/);
-  if (t === 'max' && m) name += ' ' + m[1] + 'x';
-  return name;
+  if (t === 'ultra' || (t === 'max' && m?.[1] === '20')) return 'Ultra (x20)';
+  if (t === 'max' && m?.[1] === '5') return 'Max (x5)';
+  return cap(t);
+}
+function displayPlanName(plan) {
+  if (/^Max\s+20x$/i.test(String(plan || ''))) return 'Ultra (x20)';
+  if (/^Max\s+5x$/i.test(String(plan || ''))) return 'Max (x5)';
+  return plan;
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,12 +273,13 @@ function parseWindows(data) {
 
 /* Open Claude Code chats per account: async, cached 3 s per config folder, files older than 24 h count as dead. */
 const readSessions = createSessionReader({ inContainer: Boolean(ACCOUNTS_DIR) }); // host pids are not visible in Docker
+const readDesktopLimits = createDesktopLimitReader();
 
 const readCodexSessions = createCodexSessionReader();
 
-async function safeSessions(acc) {
+async function safeSessions(acc, paused = new Map()) {
   if (acc.provider === 'codex') { try { return await readCodexSessions(expandHome(acc.configDir)); } catch { return []; } }
-  try { return await readSessions(expandHome(acc.configDir)); } catch { return []; }
+  try { return await readSessions(expandHome(acc.configDir), paused); } catch { return []; }
 }
 
 async function fetchStatus(acc) {
@@ -355,7 +362,7 @@ async function fetchStatus(acc) {
 /* ------------------------------------------------------------------ */
 
 const MOCK_FACTOR = [0.72, 1.3, 0.35];
-const MOCK_PLANS = ['Max 5x', 'Pro', 'Max 20x'];
+const MOCK_PLANS = ['Max (x5)', 'Pro', 'Ultra (x20)'];
 const H5 = 5 * 3600e3;
 const D7 = 7 * 864e5;
 
@@ -588,13 +595,25 @@ async function handler(req, res) {
       const accounts = loadAccounts();
       const statuses = await Promise.all(accounts.map((a, i) => getStatus(a, i, force)));
       // sessions: async, cached 3 s per config folder; usage is cached longer
-      let sessionLists = MOCK ? [] : await Promise.all(accounts.map(safeSessions));
+      let profiles = {};
+      if (process.platform === 'win32' && !MOCK) {
+        try { profiles = findWindowsDesktopProfiles(); } catch { /* Desktop not installed */ }
+      }
+      const pausedFor = (account) => {
+        if (account.provider) return new Map();
+        const folder = path.basename(expandHome(account.configDir)).toLowerCase();
+        const profileId = folder === '.claude' ? 'personal' : folder.replace(/^\.claude-/, '');
+        return profiles[profileId] ? readDesktopLimits(profiles[profileId]) : new Map();
+      };
+      let sessionLists = MOCK ? [] : await Promise.all(accounts.map((account) => safeSessions(account, pausedFor(account))));
       if (process.platform === 'win32' && !MOCK && sessionLists.some((list) => list.some((session) => session.pid))) {
-        try { sessionLists = routeDesktopSessions(accounts, sessionLists, findWindowsDesktopProfiles(), await claudeProcessTree()); }
+        try { sessionLists = routeDesktopSessions(accounts, sessionLists, profiles, await claudeProcessTree()); }
         catch { sessionLists = routeDesktopSessions(accounts, sessionLists, {}, []); }
       }
+      const resumedElsewhere = new Set(sessionLists.flatMap((list) => list.filter((session) => session.state !== 'paused').map((session) => session.id)));
+      sessionLists = sessionLists.map((list) => list.filter((session) => session.state !== 'paused' || !resumedElsewhere.has(session.id)));
       sessionLists = sessionLists.map((list) => list.map(({ pid, ...session }) => session));
-      const list = statuses.map((v, i) => ({ ...v, name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
+      const list = statuses.map((v, i) => ({ ...v, plan: displayPlanName(v.plan), name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
         sessions: MOCK ? [] : sessionLists[i] }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }

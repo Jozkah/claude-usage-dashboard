@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { visibleUsageWindows } from './plan-limits.js';
 
-test('removes five-hour window from Max 5x and Max 20x only', () => {
+test('removes five-hour window from Max and Ultra', () => {
   const windows = [{ key: 'five_hour' }, { key: 'seven_day' }];
-  for (const plan of ['Max 5x', 'Max 20x']) {
+  for (const plan of ['Max 5x', 'Max 20x', 'Max (x5)', 'Ultra (x20)', 'Ultra']) {
     assert.deepEqual(visibleUsageWindows(plan, windows), [{ key: 'seven_day' }]);
   }
-  for (const plan of ['Enterprise', 'Team', 'Pro', 'Ultra', null]) {
+  for (const plan of ['Enterprise', 'Team', 'Pro', 'Free', null]) {
     assert.deepEqual(visibleUsageWindows(plan, windows), windows);
   }
   assert.deepEqual(windows, [{ key: 'five_hour' }, { key: 'seven_day' }]);
