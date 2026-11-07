@@ -158,6 +158,24 @@ test('repairs newer full transcript pointer into closed Personal profile without
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('closed profile can follow a newer continuation with a different transcript id', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-continuation-');
+  try {
+    const name = 'local_123abc.json';
+    const old = { sessionId: 'local_123abc', cliSessionId: 'f06a3779-e1f5-4b3d-bb34-7dd745e0e247',
+      title: 'Shared chat', completedTurns: 29, lastActivityAt: 100 };
+    const current = { ...old, cliSessionId: '5603d0eb-a1d3-4483-8108-a10b1afd7fbf',
+      completedTurns: 57, lastActivityAt: 200 };
+    fs.writeFileSync(path.join(p, name), JSON.stringify(current));
+    fs.writeFileSync(path.join(w, name), JSON.stringify(old));
+    assert.equal(repairStaleDesktopSessionRecords(personal, work), 0);
+    assert.equal(repairStaleDesktopSessionRecords(personal, work,
+      { targetProfile: 'work', preferLatestTranscript: true }), 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(w, name), 'utf8')), current);
+    assert.equal(listBackups(path.join(w, name), 'stale').length, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('closed Work profile follows Personal archive state and newer turns', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-work-reconcile-'));
   try {
@@ -206,6 +224,18 @@ test('discovers additional isolated Desktop profiles', { skip: process.platform 
     }
     fs.mkdirSync(path.join(third, 'claude-code-sessions', 'third-account', 'device'), { recursive: true });
     assert.deepEqual(findWindowsDesktopProfiles(local), { personal, work, third });
+  } finally { fs.rmSync(local, { recursive: true, force: true }); }
+});
+
+test('discovers a newly signed-in profile without requiring a Work profile', { skip: process.platform !== 'win32' && 'Claude Desktop profiles exist on Windows only' }, () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-new-profile-'));
+  try {
+    const personal = path.join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc');
+    const work2 = path.join(local, 'ClaudeProfiles', 'Work2');
+    fs.mkdirSync(path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache'), { recursive: true });
+    fs.mkdirSync(path.join(personal, 'claude-code-sessions'), { recursive: true });
+    fs.mkdirSync(path.join(work2, 'claude-code-sessions', 'account', 'device'), { recursive: true });
+    assert.deepEqual(findWindowsDesktopProfiles(local), { personal, work2 });
   } finally { fs.rmSync(local, { recursive: true, force: true }); }
 });
 

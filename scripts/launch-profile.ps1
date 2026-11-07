@@ -55,6 +55,23 @@ try {
     if (Test-Path -LiteralPath (Join-Path $legacy 'claude-code-sessions')) { $userDataDir = $legacy }
   }
   New-Item -ItemType Directory -Force -Path $userDataDir | Out-Null
+  # Existing profiles get their chats and Personal's sidebar before Claude loads its in-memory index.
+  # First sign-in has no account scope yet; background dashboard sync copies chats once it appears.
+  try {
+    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'Claude.exe'" -ErrorAction Stop |
+      Where-Object { $_.CommandLine -match [regex]::Escape($userDataDir) })
+  } catch {
+    Write-LaunchLog 'Cannot inspect running Claude processes; skipping profile bootstrap.'
+    $running = @(1)
+  }
+  $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $running.Count -and $node) {
+    & $node.Source (Join-Path $PSScriptRoot 'bootstrap-profile.mjs') $Name 2>&1 |
+      ForEach-Object { Write-LaunchLog "Bootstrap: $_" }
+    if ($LASTEXITCODE -ne 0) { Write-LaunchLog "Bootstrap exited with code $LASTEXITCODE." }
+  }
+  # Starting any account also starts the dashboard sync service, even without its own shortcut.
+  & (Join-Path $PSScriptRoot 'start-dashboard.ps1')
   $mutex.ReleaseMutex()
   Start-Process -FilePath $portableExe -WorkingDirectory $portable `
     -ArgumentList ('--user-data-dir=' + [char]34 + $userDataDir + [char]34)

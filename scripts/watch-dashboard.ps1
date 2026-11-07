@@ -6,6 +6,7 @@ $serverLog = Join-Path $dataDir 'dashboard-server.log'
 $serverErrLog = Join-Path $dataDir 'dashboard-server-error.log'
 $server = Join-Path $root 'server\index.js'
 $dependency = Join-Path $root 'node_modules\react\package.json'
+$desktopSyncDependency = Join-Path $root 'node_modules\classic-level\package.json'
 $port = if ($env:PORT) { $env:PORT } else { '4777' }
 $healthUrl = "http://127.0.0.1:$port/api/health"
 $maxLogBytes = 1MB
@@ -48,14 +49,16 @@ try {
       $node = Resolve-Tool 'node' @('node.exe')
       $npm = Resolve-Tool 'npm' @('npm.cmd')
       if (-not $node -or -not $npm) { throw 'Node.js or npm not found on PATH or in Program Files.' }
-      if (-not (Test-Path -LiteralPath $dependency)) {
+      if (-not (Test-Path -LiteralPath $dependency) -or
+          (($IsWindows -or $env:OS -eq 'Windows_NT') -and -not (Test-Path -LiteralPath $desktopSyncDependency))) {
         Write-WatchLog 'Installing dashboard dependencies.'
         $verb = if (Test-Path -LiteralPath (Join-Path $root 'package-lock.json')) { 'ci' } else { 'install' }
-        $install = Start-Process -FilePath $npm -ArgumentList $verb, '--prefer-offline', '--no-audit', '--no-fund' `
+        $install = Start-Process -FilePath $npm -ArgumentList $verb, '--include=optional', '--prefer-offline', '--no-audit', '--no-fund' `
           -WorkingDirectory $root -WindowStyle Hidden -Wait -PassThru `
           -RedirectStandardOutput (Join-Path $dataDir 'dashboard-install.log') `
           -RedirectStandardError (Join-Path $dataDir 'dashboard-install-error.log')
-        if ($install.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dependency)) {
+        if ($install.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dependency) -or
+            (($IsWindows -or $env:OS -eq 'Windows_NT') -and -not (Test-Path -LiteralPath $desktopSyncDependency))) {
           throw "npm $verb failed with exit code $($install.ExitCode)."
         }
       }

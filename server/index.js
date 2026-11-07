@@ -908,6 +908,7 @@ function startDesktopSync() {
     try {
       const profiles = findWindowsDesktopProfiles();
       const ids = Object.keys(profiles);
+      if (ids.length < 2) return;
       const running = await desktopProfileState(profiles);
       for (const profile of ids) {
         if (running[profile]) {
@@ -920,7 +921,8 @@ function startDesktopSync() {
         let staleRepaired = 0;
         for (const source of ids.filter((id) => id !== profile)) {
           repaired += repairEmptyDesktopSessionRecords(profiles[source], profiles[profile], { targetProfile: 'work' });
-          staleRepaired += repairStaleDesktopSessionRecords(profiles[source], profiles[profile], { targetProfile: 'work' });
+          staleRepaired += repairStaleDesktopSessionRecords(profiles[source], profiles[profile],
+            { targetProfile: 'work', preferLatestTranscript: true });
         }
         const reconciled = profile !== 'personal'
           ? reconcileWorkSessionRecords(profiles.personal, profiles[profile]) : 0;

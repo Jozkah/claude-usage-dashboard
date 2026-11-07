@@ -311,8 +311,8 @@ export function repairEmptyDesktopSessionRecords(personalProfile, workProfile, {
 
 // Call only while target Desktop profile is closed. A pointer with fewer turns
 // can keep showing an incomplete transcript even when both profiles share JSONL.
-/** @param {string} personalProfile @param {string} workProfile @param {{ targetProfile?: string, errors?: any[], stateDir?: string }} [options] */
-export function repairStaleDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both', errors, stateDir } = {}) {
+/** @param {string} personalProfile @param {string} workProfile @param {{ targetProfile?: string, errors?: any[], stateDir?: string, preferLatestTranscript?: boolean }} [options] */
+export function repairStaleDesktopSessionRecords(personalProfile, workProfile, { targetProfile = 'both', errors, stateDir, preferLatestTranscript = false } = {}) {
   const personal = profileFiles(personalProfile);
   const work = profileFiles(workProfile);
   let repaired = 0;
@@ -338,7 +338,7 @@ export function repairStaleDesktopSessionRecords(personalProfile, workProfile, {
       if (sourceTurns <= targetTurns || sourceTurns <= 0 ||
           !strictlyNewer(sourceRecord.lastActivityAt, targetRecord.lastActivityAt) ||
           !/^[0-9a-f-]{36}$/i.test(sourceRecord.cliSessionId || '')) continue;
-      if (targetTurns > 0 && sourceRecord.cliSessionId !== targetRecord.cliSessionId) continue;
+      if (targetTurns > 0 && sourceRecord.cliSessionId !== targetRecord.cliSessionId && !preferLatestTranscript) continue;
       const temp = `${target}.sync-${crypto.randomUUID()}.tmp`;
       try {
         const before = fs.statSync(source);
@@ -454,8 +454,9 @@ export function findWindowsDesktopProfiles(local = process.env.LOCALAPPDATA || p
     const currentWork = path.join(local, 'ClaudeProfiles', 'Work');
     const work = fs.existsSync(path.join(legacyWork, 'claude-code-sessions'))
       ? legacyWork : currentWork;
-    if (fs.existsSync(path.join(personal, 'claude-code-sessions')) && fs.existsSync(path.join(work, 'claude-code-sessions'))) {
-      const profiles = { personal, work };
+    if (fs.existsSync(path.join(personal, 'claude-code-sessions'))) {
+      const profiles = { personal };
+      if (fs.existsSync(path.join(work, 'claude-code-sessions'))) profiles.work = work;
       const addExtras = (directory) => {
         if (!fs.existsSync(directory)) return;
         for (const extra of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -475,5 +476,5 @@ export function findWindowsDesktopProfiles(local = process.env.LOCALAPPDATA || p
       return profiles;
     }
   }
-  throw new Error('Personal and Work Claude Desktop profiles were not found.');
+  throw new Error('Personal Claude Desktop profile was not found.');
 }
