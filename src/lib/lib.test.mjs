@@ -151,6 +151,7 @@ test('planTier maps Claude and Codex plan names to colour tiers', () => {
   assert.equal(planTier('Max (x5)'), 'max5');
   assert.equal(planTier('Max 5x'), 'max5');
   assert.equal(planTier('Team'), 'team');
+  assert.equal(planTier('Team (Premium)'), 'team');
   assert.equal(planTier('Pro'), 'pro');
   assert.equal(planTier('Codex Plus'), 'plus');
   assert.equal(planTier('Codex Pro'), 'pro');

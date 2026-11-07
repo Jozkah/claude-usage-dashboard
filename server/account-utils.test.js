@@ -12,6 +12,13 @@ test('normalizeAccounts drops malformed and duplicate entries', () => {
   assert.equal(dropped.length, 4);
 });
 
+test('keeps only valid manually confirmed Team seat labels', () => {
+  const base = { id: 'work', name: 'Work', configDir: '/work' };
+  assert.deepEqual(normalizeAccounts([{ ...base, seatTier: 'premium' }]).accounts[0], { ...base, seatTier: 'premium' });
+  assert.deepEqual(normalizeAccounts([{ ...base, seatTier: 'guessed' }]).accounts[0], base);
+  assert.deepEqual(normalizeAccounts([{ ...base, provider: 'codex', seatTier: 'standard' }]).accounts[0], { ...base, provider: 'codex' });
+});
+
 test('uniqueIds suffixes collisions', () => {
   assert.deepEqual(uniqueIds([{ id: 'work' }, { id: 'work' }, { id: 'work' }]).map((e) => e.id), ['work', 'work-2', 'work-3']);
 });

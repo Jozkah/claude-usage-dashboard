@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Hourglass, WifiOff, X } from 'lucide-react';
-import { openClaude, removeAccount, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
+import { openClaude, removeAccount, setTeamSeat, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
 import { useEffectsPref } from './lib/effects';
@@ -94,6 +94,20 @@ export default function App() {
       { label: `Open Claude Code as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name), 'Could not open Claude Code.') },
       { label: `Open Claude Desktop as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'desktop', target.name), 'Could not open Claude Desktop.') },
     ];
+    if (/^Team\b/i.test(target.plan ?? '')) {
+      for (const seat of ['standard', 'premium'] as const) {
+        out.push({ label: `Mark seat ${seat === 'standard' ? 'Standard' : 'Premium'}`, run: () => void runAction(async () => {
+          const message = await setTeamSeat(target.id, seat);
+          await refresh(true);
+          return message;
+        }, 'Could not save Team seat.') });
+      }
+      if (target.seatTier) out.push({ label: 'Clear seat label', run: () => void runAction(async () => {
+        const message = await setTeamSeat(target.id, null);
+        await refresh(true);
+        return message;
+      }, 'Could not clear Team seat.') });
+    }
     // source for chat sharing: the 'personal' account when present, otherwise any other account
     const source = claude.find((a) => a.id === 'personal' && a.id !== target.id) ?? claude.find((a) => a.id !== target.id);
     if (!source) return out;
@@ -129,9 +143,9 @@ export default function App() {
         const id = a.id + '|' + w.resetsAt;
         present.add(id);
         const at = new Date(w.resetsAt).getTime();
-        if (!a.stale && at < now && now - at < 60000 && !resetSeen.current.has(id)) {
+        if (!a.stale && at > Date.now() - 60000 && at - Date.now() < 8 * 864e5 && !resetSeen.current.has(id)) {
           resetSeen.current.add(id);
-          const timer = setTimeout(() => { resetTimers.current.delete(timer); void refresh(true); }, 4000);
+          const timer = setTimeout(() => { resetTimers.current.delete(timer); void refresh(true); }, Math.max(0, at - Date.now() + 4000));
           resetTimers.current.add(timer);
         }
       }

@@ -80,6 +80,11 @@ export async function removeAccount(id: string): Promise<void> {
   }
 }
 
+export async function setTeamSeat(id: string, seatTier: 'standard' | 'premium' | null): Promise<string> {
+  await postJson('/api/accounts/' + encodeURIComponent(id) + '/seat', 'Could not save Team seat.', { seatTier });
+  return seatTier ? `Team seat set to ${seatTier}.` : 'Team seat marked unknown.';
+}
+
 export async function startAccountLogin(id: string): Promise<void> {
   await postJson('/api/accounts/' + encodeURIComponent(id) + '/login', 'Could not start sign-in.');
 }

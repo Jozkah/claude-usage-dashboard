@@ -27,6 +27,7 @@ export interface Account {
   provider?: 'codex';
   fetchedAt: number;
   plan?: string | null;
+  seatTier?: 'standard' | 'premium' | null;
   /** Snapshot seeded without a known plan: limits shown may be incomplete. */
   planUnknown?: boolean;
   status: AccountStatus;

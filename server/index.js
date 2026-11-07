@@ -613,7 +613,8 @@ async function handler(req, res) {
       const resumedElsewhere = new Set(sessionLists.flatMap((list) => list.filter((session) => session.state !== 'paused').map((session) => session.id)));
       sessionLists = sessionLists.map((list) => list.filter((session) => session.state !== 'paused' || !resumedElsewhere.has(session.id)));
       sessionLists = sessionLists.map((list) => list.map(({ pid, ...session }) => session));
-      const list = statuses.map((v, i) => ({ ...v, plan: displayPlanName(v.plan), name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
+      const list = statuses.map((v, i) => ({ ...v, plan: /^Team$/i.test(v.plan || '') ? `Team (${accounts[i].seatTier ? cap(accounts[i].seatTier) : 'seat unknown'})` : displayPlanName(v.plan),
+        seatTier: accounts[i].seatTier || null, name: accounts[i].name, configDir: accounts[i].configDir, ...(accounts[i].provider ? { provider: accounts[i].provider } : {}),
         sessions: MOCK ? [] : sessionLists[i] }));
       return sendJson(res, 200, { serverTime: Date.now(), mock: MOCK, accounts: list });
     }
@@ -670,6 +671,22 @@ async function handler(req, res) {
       let id = slug(name);
       while (accounts.some((a) => a.id === id)) id = slug(name) + '-' + crypto.randomBytes(2).toString('hex');
       accounts.push({ id, name, configDir, ...(body.provider === 'codex' ? { provider: 'codex' } : {}) });
+      saveAccounts(accounts);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === 'POST' && /^\/api\/accounts\/[^/]+\/seat$/.test(url.pathname)) {
+      if (blocked(req, res)) return;
+      const id = decodeId(url.pathname.split('/')[3]);
+      const accounts = loadAccounts();
+      const account = accounts.find((candidate) => candidate.id === id && candidate.provider !== 'codex');
+      if (!account) return sendJson(res, 404, { error: 'Claude account not found.' });
+      const { seatTier } = await parseJsonBody(req);
+      if (seatTier !== null && seatTier !== 'standard' && seatTier !== 'premium') {
+        return sendJson(res, 400, { error: 'Seat must be Standard, Premium, or unknown.' });
+      }
+      if (seatTier === null) delete account.seatTier;
+      else account.seatTier = seatTier;
       saveAccounts(accounts);
       return sendJson(res, 200, { ok: true });
     }

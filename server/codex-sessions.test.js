@@ -10,11 +10,11 @@ const ID_B = '01a1a3f8-3731-73c0-8565-1e131d86a672';
 const ID_C = '01a1a62f-d7c8-7a21-a1ea-d0f2fb760f8c';
 const NOW = 1_800_000_000_000;
 
-function rollout(home, day, id, events, { cwd = String.raw`C:\Users\me\Coding\my-app`, ageMs = 1000 } = {}) {
+function rollout(home, day, id, events, { cwd = String.raw`C:\Users\me\Coding\my-app`, ageMs = 1000, source } = {}) {
   const dir = path.join(home, 'sessions', ...day.split('-'));
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `rollout-${day}T01-00-00-${id}.jsonl`);
-  const lines = [JSON.stringify({ type: 'session_meta', payload: { id, cwd, base_instructions: 'x'.repeat(2000) } }),
+  const lines = [JSON.stringify({ type: 'session_meta', payload: { id, cwd, source, base_instructions: 'x'.repeat(2000) } }),
     ...events.map((type) => JSON.stringify({ type: 'event_msg', payload: { type } }))];
   fs.writeFileSync(file, lines.join('\n') + '\n');
   const t = new Date(NOW - ageMs);
@@ -54,5 +54,17 @@ test('a started task in a file untouched for minutes is not shown as working; mi
     const read = createCodexSessionReader({ now: () => NOW });
     assert.equal((await read(home))[0].working, false);
     assert.deepEqual(await createCodexSessionReader({ now: () => NOW })(path.join(home, 'nope')), []);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('hides Codex guardian subagents without hiding a user chat with the same title', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-sess-'));
+  try {
+    rollout(home, '2026-11-04', ID_A, ['task_complete'], { source: { subagent: { other: 'guardian' } } });
+    rollout(home, '2026-11-04', ID_B, ['task_complete']);
+    fs.writeFileSync(path.join(home, 'session_index.jsonl'),
+      [ID_A, ID_B].map((id) => JSON.stringify({ id, thread_name: 'Guardian review' })).join('\n'));
+    const list = await createCodexSessionReader({ now: () => NOW })(home);
+    assert.deepEqual(list.map((session) => session.id), [ID_B]);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

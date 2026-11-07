@@ -22,7 +22,8 @@ export function normalizeAccounts(list) {
       && ['id', 'name', 'configDir'].every((k) => typeof a[k] === 'string' && a[k].trim());
     if (!ok || seen.has(a.id)) { dropped.push(a); continue; }
     seen.add(a.id);
-    accounts.push({ id: a.id, name: a.name, configDir: a.configDir, ...(a.provider === 'codex' ? { provider: 'codex' } : {}) });
+    accounts.push({ id: a.id, name: a.name, configDir: a.configDir, ...(a.provider === 'codex' ? { provider: 'codex' } : {}),
+      ...(['standard', 'premium'].includes(a.seatTier) && a.provider !== 'codex' ? { seatTier: a.seatTier } : {}) });
   }
   return { accounts, dropped };
 }

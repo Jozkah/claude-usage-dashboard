@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtClock, isIdle, levelFor, mainWindows, paceFor } from '../lib/format';
 import { accountReset } from '../lib/reset';
+import { useNow } from '../lib/api';
 import { Chip } from './Chip';
 import { Countdown } from './Countdown';
 import { FrameCard } from './FrameCard';
@@ -24,6 +25,12 @@ interface Props {
   onLongPress?: (x: number, y: number) => void;
 }
 
+function ResetCountdown({ at, estimated }: { at: number; estimated: boolean }) {
+  const now = useNow(1000);
+  if (at <= now) return <>Reset reached · updating usage</>;
+  return <>{estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums"><Countdown at={at} /></b></>;
+}
+
 function Gauge({ w, now, account }: { w: UsageWindow; now: number; account: Account }) {
   const { stale, retryAt } = account;
   const pace = paceFor(w, now);
@@ -37,7 +44,7 @@ function Gauge({ w, now, account }: { w: UsageWindow; now: number; account: Acco
       <div className="mt-auto pt-3 text-[12.5px] text-muted-fg">
         {reset ? (
           <>
-            {reset.estimated ? 'Estimated reset in ' : 'Resets in '}<b className="font-semibold text-fg tabular-nums"><Countdown at={reset.at} /></b>
+            <ResetCountdown at={reset.at} estimated={reset.estimated} />
           </>
         ) : stale && retryAt && retryAt > now ? <>Next usage check in <Countdown at={retryAt} /></>
           : stale ? 'Reset needs fresh reading' : w.resetsAt ? 'Awaiting updated reset' : 'Reset time unknown'}
@@ -96,7 +103,7 @@ function Bar({ w, now, account }: { w: UsageWindow; now: number; account: Accoun
       </div>
       {(w.resetsAt || stale) && (
         <div className="mt-1 text-[11.5px] text-subtle-fg">
-          {reset ? <>{reset.estimated ? 'Estimated reset in ' : 'Resets in '}<span className="tabular-nums"><Countdown at={reset.at} /></span></>
+          {reset ? <ResetCountdown at={reset.at} estimated={reset.estimated} />
             : stale ? 'Reset time unavailable' : 'Awaiting updated reset'}
         </div>
       )}
@@ -170,7 +177,7 @@ export function AccountCard({ account: a, now, delay, onRemove, onLogin, onConte
   const main = mainWindows(a);
   const rest = a.windows.filter((w) => !main.includes(w));
   const critical = a.windows.some((w) => w.used >= 90);
-  const weeklyPending = /^Team$/i.test(a.plan ?? '') && !a.windows.some((w) => w.key === 'seven_day');
+  const weeklyPending = /^Team\b/i.test(a.plan ?? '') && !a.windows.some((w) => w.key === 'seven_day');
 
   return (
     <FrameCard

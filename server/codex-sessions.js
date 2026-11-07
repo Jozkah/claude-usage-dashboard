@@ -75,20 +75,27 @@ export function createCodexSessionReader({ now = Date.now } = {}) {
       if (t - st.mtimeMs <= ACTIVE_WINDOW_MS) recent.push({ file, mtime: st.mtimeMs, size: st.size });
     }
     const names = recent.length ? threadNames(codexHome) : new Map();
-    const list = recent.map(({ file, mtime, size }) => {
+    const list = recent.flatMap(({ file, mtime, size }) => {
+      let head = '';
+      try { head = readSlice(file, 0, Math.min(size, HEAD_BYTES)); } catch { return []; }
+      // Codex guardian/reviewer workers are internal subagents, not user chats.
+      try {
+        const first = JSON.parse(head.split('\n', 1)[0]);
+        if (first.type === 'session_meta' && first.payload?.source?.subagent) return [];
+      } catch { /* damaged metadata: retain the chat */ }
       let busy = false;
       try { busy = t - mtime <= WORKING_WINDOW_MS && turnState(readSlice(file, Math.max(0, size - TAIL_BYTES), Math.min(size, TAIL_BYTES))) === 'busy'; } catch { /* unreadable: treat as waiting */ }
       if (!folders.has(file)) {
         let folder = null;
         try {
-          const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(readSlice(file, 0, Math.min(size, HEAD_BYTES)))?.[1];
+          const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1];
           // Split on both separators: a Windows path may be read on Linux (Docker), where path.basename keeps it whole.
           if (cwd) folder = JSON.parse(`"${cwd}"`).split(/[\\/]+/).filter(Boolean).pop() ?? null;
         } catch { /* leave null */ }
         folders.set(file, folder);
       }
       const id = idOf(file);
-      return { id, name: names.get(id) ?? null, folder: folders.get(file) ?? null, lastActiveAt: Math.round(mtime), working: busy, state: busy ? 'busy' : 'waiting' };
+      return [{ id, name: names.get(id) ?? null, folder: folders.get(file) ?? null, lastActiveAt: Math.round(mtime), working: busy, state: busy ? 'busy' : 'waiting' }];
     }).sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     cache.set(codexHome, { at: t, list });
     return list;

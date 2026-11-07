@@ -10,7 +10,7 @@ export function planTier(plan: string | null | undefined): PlanTier {
   if (p === 'free') return 'free';
   if (p === 'pro') return 'pro';
   if (p === 'plus') return 'plus';
-  if (p === 'team') return 'team';
+  if (p.startsWith('team')) return 'team';
   if (p === 'business' || p === 'enterprise' || p === 'edu') return 'business';
   return 'unknown';
 }
