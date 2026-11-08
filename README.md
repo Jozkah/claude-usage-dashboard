@@ -88,7 +88,7 @@ Crossing organizations can show a Claude Code notice about earlier thinking. [An
 
 Choose **Copy local Code plugins and skills to Work** to copy missing locally installed plugins, their cache and marketplaces, and local skills from Personal. It preserves Work's existing plugin choices and never copies login files, hooks, permission settings, or account-managed skills. This copies about 300 MB on a typical configured machine. Claude Desktop Customize plugins and connectors sync through each Claude account separately and cannot be copied by this dashboard.
 
-Desktop groups sessions by their recorded working folders. To see a flat list instead of many `scratch-*` groups, turn off **Group by project** in the controls above Recents.
+Desktop groups sessions by their recorded working folders. Background sidebar sync assigns ungrouped chats to an existing custom group when their exact working folder matches a grouped chat. Scratch sessions without a project match go into **General**. Personal's explicit assignments take priority across profiles. Changes appear after each Desktop profile fully exits, including its tray process, and reopens. This does not change working folders or chat contents. To see a flat list, turn off **Group by project** above Recents.
 
 This action needs dashboard running directly on same computer as Claude Code. It is unavailable in Docker demo mode and cannot link a read-only container mount.
 

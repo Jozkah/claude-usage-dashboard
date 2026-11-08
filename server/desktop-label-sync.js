@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { mergeDesktopLabelSnapshotsThreeWay } from './desktop-auto-label-sync.js';
+import { organizeDesktopFolders } from './desktop-folder-organizer.js';
 import { createBackup, writeFileAtomic, loadState, saveState } from './sync-support.js';
 
 // Chromium Local Storage encoding and pending-marker behavior follow the
@@ -282,10 +283,26 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
   const baselineKey = [...pids].sort().join('|');
   const source = sourceId && participants.find((participant) => participant.profileId === sourceId);
   if (sourceId && !source) throw new Error(`Source Desktop profile not found: ${sourceId}`);
-  const merged = source
+  let merged = source
     ? { ...snapshotOf(source), conflicts: [] }
     : mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
       { baseline: baselines[baselineKey] || null, ids: pids });
+  if (source) {
+    // Personal controls explicit choices; retain unique assignments for its ungrouped chats.
+    const assigned = new Map(/** @type {[string, string][]} */ (merged.assignments));
+    const validGroups = new Set(merged.groups.map((group) => group.id));
+    const candidates = new Map();
+    for (const participant of participants) {
+      for (const [chat, group] of snapshotOf(participant).assignments) {
+        if (assigned.has(chat) || !validGroups.has(group)) continue;
+        if (!candidates.has(chat)) candidates.set(chat, new Set());
+        candidates.get(chat).add(group);
+      }
+    }
+    for (const [chat, groups] of candidates) if (groups.size === 1) assigned.set(chat, [...groups][0]);
+    merged.assignments = [...assigned];
+    merged = { ...organizeDesktopFolders(merged, participants).snapshot, conflicts: [] };
+  }
   const targets = participants.filter((participant) => targetIds.includes(participant.profileId));
   const titles = syncDesktopTitles(participants, targets, stateDir, sourceId);
   let updated = 0;
