@@ -62,6 +62,15 @@ try {
           throw "npm $verb failed with exit code $($install.ExitCode)."
         }
       }
+      # The built UI (dist) is regenerable and cleanup tools delete it; without it the server only shows "API is running".
+      $dist = Join-Path $root 'dist\index.html'
+      if (-not (Test-Path -LiteralPath $dist)) {
+        Write-WatchLog 'Building the dashboard UI (dist is missing).'
+        $build = Start-Process -FilePath $npm -ArgumentList 'run', 'build' -WorkingDirectory $root -WindowStyle Hidden -Wait -PassThru `
+          -RedirectStandardOutput (Join-Path $dataDir 'dashboard-build.log') `
+          -RedirectStandardError (Join-Path $dataDir 'dashboard-build-error.log')
+        if ($build.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dist)) { Write-WatchLog "npm run build failed with exit code $($build.ExitCode); see data\dashboard-build-error.log." }
+      }
       $healthy = $false
       try {
         $response = Invoke-WebRequest -UseBasicParsing $healthUrl -TimeoutSec 4
