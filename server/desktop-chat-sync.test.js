@@ -475,3 +475,16 @@ test('backups go to the dedicated folder and only the newest are kept', () => {
     assert.equal(fs.readdirSync(p).some((name) => name.includes('.backup-')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a chat that has not started yet is copied only once it has a CLI session id', () => {
+  const { root, personal, work, p, w } = twoProfiles('claude-desktop-stub-');
+  try {
+    const file = path.join(p, 'local_33333333-3333-4333-8333-333333333333.json');
+    fs.writeFileSync(file, JSON.stringify({ sessionId: 'local_33333333-3333-4333-8333-333333333333', title: 'New chat' }));
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 0);
+    assert.equal(fs.existsSync(path.join(w, 'local_33333333-3333-4333-8333-333333333333.json')), false);
+    fs.writeFileSync(file, JSON.stringify({ sessionId: 'local_33333333-3333-4333-8333-333333333333', cliSessionId: '0ee799c5-8c6a-4a76-b678-e6421d980708', completedTurns: 1, title: 'New chat' }));
+    assert.equal(syncDesktopSessionRecords(personal, work).toWork, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(w, 'local_33333333-3333-4333-8333-333333333333.json'), 'utf8')).completedTurns, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

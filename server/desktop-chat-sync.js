@@ -162,6 +162,10 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
           if (error instanceof SyntaxError) continue;
           throw error;
         }
+        // A chat that has not started yet (no CLI session id) is only a stub. Copying it freezes the stub in the other
+        // profile, because an open Desktop app is never rewritten, so the real chat would not show up until a restart.
+        // It is copied on a later tick, once its first turn has produced a session id.
+        if (typeof record.sessionId === 'string' && !record.cliSessionId && !(Number(record.completedTurns) > 0)) continue;
         // Claude's live resume import creates a new pointer named after cliSessionId.
         // Copying either pointer again would create duplicate sidebar entries.
         if (record.adoptedFromOtherSurface ||
