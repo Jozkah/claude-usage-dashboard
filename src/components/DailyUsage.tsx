@@ -5,6 +5,7 @@ import { modelName } from '../lib/format';
 import type { DayUsage, ModelPrice, NamedShare, TokenReport } from '../lib/types';
 import { FrameCard } from './FrameCard';
 import { Select } from './Select';
+import { useProgressive } from '../lib/scroll';
 
 function useTokens() {
   const [report, setReport] = useState<TokenReport | null>(null);
@@ -282,6 +283,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
     return { ...base, clientShares, clientNames, modelRows, modelOptions: ranked };
   }, [report, range, metric, client, model]);
 
+  const rows = useProgressive(view.table.length, 30, `${range}|${client}|${model}`);
   const scanning = report && (report.scanning || !report.ready);
   const shown = hover != null ? view.list[hover] : null;
   const shownVal = shown ? view.val(shown.d) : null;
@@ -405,9 +407,9 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
 
             <div className="mt-6">
               <div className="mb-2 text-[12px] font-medium text-muted-fg">Day by day</div>
-              <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
+              <div className="rounded-lg border border-line">
                 <table className="w-full text-[12.5px]">
-                  <thead className="sticky top-0 bg-frame text-left text-[11.5px] text-muted-fg">
+                  <thead className="sticky top-12 z-10 bg-frame text-left text-[11.5px] text-muted-fg">
                     <tr>
                       <th className="px-3 py-1.5 font-medium">Date</th>
                       <th className="px-3 py-1.5 text-right font-medium">Tokens</th>
@@ -416,8 +418,8 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
                     </tr>
                   </thead>
                   <tbody>
-                    {view.table.map((d) => (
-                      <tr key={d.date} className="border-t border-line/70">
+                    {view.table.slice(0, rows.count).map((d) => (
+                      <tr key={d.date} className="day-row border-t border-line/70">
                         <td className="px-3 py-1.5 tabular-nums">{d.date}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{tok(d.total)}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{usd(d.cost)}</td>
@@ -429,6 +431,12 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
                     )}
                   </tbody>
                 </table>
+                {rows.more && (
+                  <div ref={rows.sentinel} className="flex items-center justify-between gap-3 border-t border-line/70 px-3 py-2 text-[12px] text-subtle-fg">
+                    <span>Showing {rows.count} of {view.table.length} days. More load as you scroll.</span>
+                    <button onClick={rows.showAll} className="rounded-md px-2 py-1 font-medium text-fg transition-colors hover:bg-frame">Show all</button>
+                  </div>
+                )}
               </div>
             </div>
 

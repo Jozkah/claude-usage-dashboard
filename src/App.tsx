@@ -11,6 +11,8 @@ import { TrendCard } from './components/TrendCard';
 import { ResetTimeline } from './components/ResetTimeline';
 import { AccountRow } from './components/AccountRow';
 import { PooledLimits } from './components/PooledLimits';
+import { LazySection } from './components/LazySection';
+import { useScrollRestore } from './lib/scroll';
 import { AccountMenu, type MenuAction } from './components/AccountMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LimitTable } from './components/LimitTable';
@@ -38,6 +40,7 @@ export default function App() {
   const [setup, setSetup] = useState<{ open: boolean; sourceId: string; targetId: string }>({ open: false, sourceId: '', targetId: '' });
   const [notice, setNotice] = useState<string | null>(null);
 
+  useScrollRestore(!!data);
   const accounts = useMemo(() => data?.accounts ?? [], [data]);
   const visible = selected === 'all' ? accounts : accounts.filter((a) => a.id === selected);
   // history only changes when a new reading is recorded, not on every poll
@@ -273,6 +276,7 @@ export default function App() {
               <section id="resets" className="mt-10 scroll-mt-16">
                 <h2 className="mb-1 px-1 text-[18px] font-bold tracking-[-0.02em]">Resets and trend</h2>
                 <p className="mb-4 px-1 text-[13.5px] text-subtle-fg">When each window refills, how fast you are spending it, and the limits behind every account.</p>
+                <LazySection minHeight={820}>
                 <div className="flex flex-col gap-4">
                   <div className="grid gap-4 lg:grid-cols-5">
                     <div className="min-w-0 lg:col-span-3">
@@ -284,10 +288,11 @@ export default function App() {
                   </div>
                   <ErrorBoundary label="Limit monitor"><LimitTable accounts={visible} now={now} /></ErrorBoundary>
                 </div>
+                </LazySection>
               </section>
 
               <section id="usage" className="mt-10 scroll-mt-16">
-                <ErrorBoundary label="Daily usage"><DailyUsage /></ErrorBoundary>
+                <LazySection minHeight={1200}><ErrorBoundary label="Daily usage"><DailyUsage /></ErrorBoundary></LazySection>
               </section>
             </>
           )}

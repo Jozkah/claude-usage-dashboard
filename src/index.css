@@ -72,7 +72,10 @@
   color-scheme: dark;
 }
 
+html { scroll-padding-top: 64px; scrollbar-gutter: stable; scroll-behavior: smooth; }
 html, body, #root { min-height: 100%; }
+/* Long tables: rows far from the viewport are not laid out until they get close. */
+.day-row { content-visibility: auto; contain-intrinsic-size: auto 34px; }
 body {
   margin: 0;
   background: var(--background);
@@ -118,5 +121,6 @@ html.page-hidden *, html.page-hidden *::before, html.page-hidden *::after { anim
 :where(button, a, summary, [tabindex]):focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
