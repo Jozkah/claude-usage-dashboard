@@ -33,7 +33,6 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
   const cp = useMemo(() => (hist.ready ? checkpoints(hist.points, w, now) : null), [hist.ready, hist.points, w, now]);
   const pace = useMemo(() => (hist.ready ? paceInfo(hist.points, w, now) : null), [hist.ready, hist.points, w, now]);
   const used = Math.max(0, Math.min(100, w.used));
-  const left = Math.round(100 - used);
   const proj = pace?.projected != null ? Math.min(100, pace.projected) : null;
   const bad = pace?.tone === 'bad';
   const e = elapsedFraction(w, now);
@@ -58,7 +57,7 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
   const tickAngle = e != null ? Math.min(1, e) * 2 * Math.PI : null;
 
   return (
-    <div className={`flex flex-col items-center gap-1.5 ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${left}% left`}>
+    <div className={`flex min-w-0 flex-col items-center gap-1.5 ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${Math.round(used)}% used`}>
       <div className="relative size-[64px]">
         <svg viewBox="0 0 52 52" className="size-full -rotate-90 overflow-visible">
           <circle cx="26" cy="26" r={R} fill="none" stroke="var(--frame)" strokeWidth="4" />
@@ -73,11 +72,11 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
             <line x1={26 + (R - 5) * Math.cos(tickAngle)} y1={26 + (R - 5) * Math.sin(tickAngle)} x2={26 + (R + 5) * Math.cos(tickAngle)} y2={26 + (R + 5) * Math.sin(tickAngle)} stroke="var(--fg)" strokeWidth="1.6" strokeLinecap="round" opacity="0.8"><title>Even pace</title></line>
           )}
         </svg>
-        <span className={`absolute inset-0 grid place-items-center text-[14px] font-semibold tabular-nums ${level === 'bad' ? 'text-bad' : ''}`}>{left}</span>
+        <span className={`absolute inset-0 grid place-items-center text-[14px] font-semibold tabular-nums ${level === 'bad' ? 'text-bad' : ''}`}>{Math.round(used)}</span>
       </div>
       <span className="text-[11.5px] text-subtle-fg">{label(w)}</span>
       {cp?.sinceLast != null && <span className="text-[11px] font-semibold text-signal tabular-nums">{cp.unit === 'day' ? 'Today' : 'This hour'} +{pct(cp.sinceLast)}</span>}
-      {pace && <span className={`max-w-[112px] truncate text-[11px] font-semibold ${bad ? 'text-bad' : pace.tone === 'good' ? 'text-good' : pace.tone === 'warn' ? 'text-warn' : 'text-muted-fg'}`} title={`${pace.label}. ${pace.detail}`}>{pace.label.split(',')[0]}</span>}
+      {pace && <span className={`max-w-[116px] text-center text-[11px] leading-tight font-semibold text-balance ${bad ? 'text-bad' : pace.tone === 'good' ? 'text-good' : pace.tone === 'warn' ? 'text-warn' : 'text-muted-fg'}`} title={pace.detail}>{pace.label}</span>}
     </div>
   );
 }
@@ -119,7 +118,7 @@ export function AccountTile({ account: a, now, onOpen, onContextMenu }: Props) {
         </button>
       </div>
 
-      <div className="flex items-start justify-around py-1">
+      <div className="flex items-start justify-around gap-1 py-1">
         {ws.length ? ws.slice(0, 2).map((w) => <Ring key={w.key} w={w} account={a} now={now} dim={dim} />) : <span className="py-5 text-[12px] text-subtle-fg">{a.status === 'ok' ? 'no reading' : 'no login'}</span>}
       </div>
 
