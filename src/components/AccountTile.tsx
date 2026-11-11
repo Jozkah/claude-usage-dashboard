@@ -1,27 +1,61 @@
-import type { MouseEvent } from 'react';
+import { useMemo, type MouseEvent } from 'react';
 import { EllipsisVertical } from 'lucide-react';
 import { ProviderIcon, providerOf } from './ProviderIcon';
 import { Countdown } from './Countdown';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, fmtAgo, levelFor, mainWindows } from '../lib/format';
+import { colorVar, elapsedFraction, fmtAgo, levelFor, mainWindows } from '../lib/format';
+import { checkpoints } from '../lib/pace';
 import { accountReset } from '../lib/reset';
-import { useNow } from '../lib/api';
+import { useHistory, useNow } from '../lib/api';
 
 const SHORT: Record<string, string> = { five_hour: '5 hour', seven_day: 'Weekly' };
 const label = (w: UsageWindow) => SHORT[w.key] ?? w.label.replace(/ · all models$/i, '');
 const R = 22, C = 2 * Math.PI * R;
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** A thin ring that shows how much of the limit is left. */
-function Ring({ w, dim }: { w: UsageWindow; dim: boolean }) {
-  const left = Math.max(0, Math.min(100, 100 - w.used));
+/**
+ * A ring that fills clockwise with what was used. Each earlier day is its own arc, split by a gap at the checkpoint,
+ * the arc in violet is what was used since the last checkpoint, and the tick is where even pacing would be.
+ */
+function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now: number; dim: boolean }) {
+  const weekly = w.key.startsWith('seven_day');
+  const hist = useHistory(account.id, w.key, weekly ? '7d' : '6h', account.fetchedAt || 0);
+  const cp = useMemo(() => (hist.ready ? checkpoints(hist.points, w, now) : null), [hist.ready, hist.points, w, now]);
+  const used = Math.max(0, Math.min(100, w.used));
+  const left = Math.round(100 - used);
+  const e = elapsedFraction(w, now);
+  const level = levelFor(used);
+
+  const arcs: { from: number; to: number; today: boolean; title: string }[] = [];
+  if (cp) {
+    for (let i = 0; i < cp.marks.length - 1; i++) {
+      const m = cp.marks[i], n = cp.marks[i + 1];
+      const from = m.used ?? (arcs.length ? arcs[arcs.length - 1].to : 0);
+      const to = n.used ?? from;
+      if (to - from <= 0.05) continue;
+      const last = i === cp.marks.length - 2;
+      const name = last ? (cp.unit === 'day' ? 'Today' : 'This hour') : cp.unit === 'day' ? DAYS[new Date(m.t).getDay()] : `${String(new Date(m.t).getHours()).padStart(2, '0')}:00`;
+      arcs.push({ from, to, today: last, title: `${name}: +${(to - from).toFixed(1)}%` });
+    }
+  }
+  const seg = (from: number, to: number, color: string, extra?: object, title?: string, key?: number) => {
+    const len = Math.max(0.8, ((to - from) / 100) * C - 1.6);
+    return <circle key={key} cx="26" cy="26" r={R} fill="none" stroke={color} strokeWidth="4" strokeDasharray={`${len} ${C}`} strokeDashoffset={-(from / 100) * C} style={extra as React.CSSProperties}>{title && <title>{title}</title>}</circle>;
+  };
+  const tickAngle = e != null ? Math.min(1, e) * 2 * Math.PI : null;
+
   return (
-    <div className={`flex flex-col items-center gap-1.5 ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${Math.round(left)}% left`}>
-      <div className="relative size-[60px]">
-        <svg viewBox="0 0 52 52" className="size-full -rotate-90">
+    <div className={`flex flex-col items-center gap-1.5 ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${left}% left`}>
+      <div className="relative size-[64px]">
+        <svg viewBox="0 0 52 52" className="size-full -rotate-90 overflow-visible">
           <circle cx="26" cy="26" r={R} fill="none" stroke="var(--frame)" strokeWidth="4" />
-          <circle cx="26" cy="26" r={R} fill="none" stroke={colorVar(levelFor(w.used))} strokeWidth="4" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - left / 100)} style={{ transition: 'stroke-dashoffset 0.5s var(--ease-out-expo)' }} />
+          {arcs.length ? arcs.map((x, i) => seg(x.from, x.to, x.today ? 'var(--signal)' : 'var(--subtle-fg)', x.today ? { filter: 'drop-shadow(0 0 3px var(--glow))' } : { opacity: i % 2 ? 0.45 : 0.62 }, x.title, i))
+            : seg(0, used, level === 'good' ? 'var(--signal)' : colorVar(level))}
+          {tickAngle != null && (
+            <line x1={26 + (R - 5) * Math.cos(tickAngle)} y1={26 + (R - 5) * Math.sin(tickAngle)} x2={26 + (R + 5) * Math.cos(tickAngle)} y2={26 + (R + 5) * Math.sin(tickAngle)} stroke="var(--fg)" strokeWidth="1.6" strokeLinecap="round" opacity="0.8"><title>Even pace</title></line>
+          )}
         </svg>
-        <span className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums">{Math.round(left)}</span>
+        <span className={`absolute inset-0 grid place-items-center text-[14px] font-semibold tabular-nums ${level === 'bad' ? 'text-bad' : ''}`}>{left}</span>
       </div>
       <span className="text-[11.5px] text-subtle-fg">{label(w)}</span>
     </div>
@@ -66,7 +100,7 @@ export function AccountTile({ account: a, now, onOpen, onContextMenu }: Props) {
       </div>
 
       <div className="flex items-start justify-around py-1">
-        {ws.length ? ws.slice(0, 2).map((w) => <Ring key={w.key} w={w} dim={dim} />) : <span className="py-5 text-[12px] text-subtle-fg">{a.status === 'ok' ? 'no reading' : 'no login'}</span>}
+        {ws.length ? ws.slice(0, 2).map((w) => <Ring key={w.key} w={w} account={a} now={now} dim={dim} />) : <span className="py-5 text-[12px] text-subtle-fg">{a.status === 'ok' ? 'no reading' : 'no login'}</span>}
       </div>
 
       <div className="mt-auto truncate text-[11.5px] text-subtle-fg">
