@@ -52,6 +52,20 @@ export function UsageBar({ w, label, account, now }: Props) {
   const proj = pace?.projected != null ? Math.min(100, pace.projected) : null;
   const unit = cp?.unit === 'hour' ? 'hour' : 'day';
 
+  if (w.expired) {
+    // the reading belongs to a window that has already reset: say so instead of showing it as current
+    return (
+      <div className="min-w-0">
+        <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
+          <span className="font-medium">{label}</span>
+          <span className="text-subtle-fg">no current reading</span>
+        </div>
+        <div className="h-3 rounded-[4px] border border-dashed border-line" />
+        <div className="mt-1.5 text-[12px] text-subtle-fg">The last reading was {Math.round(used)}% used, from a window that has since reset.</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-w-0">
       <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
@@ -87,7 +101,7 @@ export function UsageBar({ w, label, account, now }: Props) {
           />
         )}
         {e != null && (
-          <span title="Where even pacing would be" className="absolute -inset-y-[3px] w-[2px] rounded-sm bg-fg/70" style={{ left: `calc(${Math.min(100, e * 100)}% - 1px)` }} />
+          <span title={`Even pace: ${Math.round(100 - e * 100)}% left by now`} className="absolute -inset-y-[3px] w-[2px] rounded-sm bg-fg/70" style={{ left: `calc(${Math.min(100, e * 100)}% - 1px)` }} />
         )}
       </div>
 

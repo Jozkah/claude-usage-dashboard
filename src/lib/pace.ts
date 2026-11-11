@@ -11,6 +11,20 @@ const windowLength = (key: string, lengthMs?: number): number | null =>
 const DAY = 864e5;
 const HOUR = 36e5;
 
+/** Percentage points of difference between what was used and what even pacing would have used that count as off pace. */
+export const PACE_BAND = 8;
+
+/**
+ * The one definition of "on pace" the whole dashboard shares: used against the share of the window that has passed.
+ * Same idea as t3code's elapsed-time pace, with a slightly wider band so the first hours of a window do not flip labels.
+ */
+export function paceBand(used: number, elapsed: number): { label: 'Over pace' | 'On pace' | 'Under pace'; tone: 'bad' | 'mute' | 'good' } {
+  const gap = used - elapsed * 100;
+  if (gap > PACE_BAND) return { label: 'Over pace', tone: 'bad' };
+  if (gap < -PACE_BAND) return { label: 'Under pace', tone: 'good' };
+  return { label: 'On pace', tone: 'mute' };
+}
+
 export interface Mark { t: number; used: number | null }
 export interface Checkpoints {
   start: number;

@@ -1,4 +1,5 @@
 import type { Account, UsageWindow } from './types';
+import { paceBand } from './pace.ts';
 
 /** Length of the windows whose reset time is known (same rule as format.ts, kept local so tests can import this file alone). */
 const windowLength = (key: string, lengthMs?: number): number | null =>
@@ -70,14 +71,13 @@ export function poolLimits(accounts: Account[], providerOf: (a: Account) => stri
         });
         const lefts = segments.flatMap((s) => (s.left == null ? [] : [s.left]));
         const left = mean(lefts);
-        const elapsed = mean(segments.flatMap((s) => (s.elapsed == null ? [] : [s.elapsed])));
+        // pace is judged only on accounts whose window has a reset clock, so a missing reading cannot skew it
+        const timed = segments.flatMap((s) => (s.elapsed == null || s.left == null ? [] : [{ used: 100 - s.left, elapsed: s.elapsed }]));
+        const elapsed = mean(timed.map((t) => t.elapsed));
         const resets = segments.flatMap((s) => (s.resetAt == null ? [] : [s.resetAt - now]));
         const resetIn = resets.length ? Math.max(0, Math.min(...resets)) : null;
         let pace: PoolRow['pace'] = null;
-        if (left != null && elapsed != null && elapsed >= 0.03) {
-          const diff = 100 - left - elapsed * 100; // positive: used more than time passed
-          pace = diff > 12 ? { label: 'Over pace', tone: 'bad' } : diff < -12 ? { label: 'Under pace', tone: 'good' } : { label: 'On pace', tone: 'mute' };
-        }
+        if (elapsed != null && elapsed >= 0.03) pace = paceBand(mean(timed.map((t) => t.used))!, elapsed);
         return { key, label: rowLabel(key, sample), segments, left, elapsed, refill: left == null ? null : 100 - left, resetIn, pace };
       });
     if (rows.length) groups.push({ provider, rows });

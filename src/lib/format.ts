@@ -1,4 +1,5 @@
 import type { Account, Level, UsageWindow } from './types';
+import { paceBand } from './pace.ts';
 
 export const levelFor = (used: number): Level => (used >= 85 ? 'bad' : used >= 60 ? 'warn' : 'good');
 export const colorVar = (l: Level) => `var(--${l})`;
@@ -25,10 +26,7 @@ export type Pace = { label: string; tone: Level | 'mute' } | null;
 export function paceFor(w: UsageWindow, now: number): Pace {
   const e = elapsedFraction(w, now);
   if (e == null || e < 0.03) return null;
-  const diff = w.used - e * 100;
-  if (diff > 12) return { label: 'Burning fast', tone: 'bad' };
-  if (diff < -12) return { label: 'Room to spare', tone: 'good' };
-  return { label: 'On pace', tone: 'mute' };
+  return paceBand(w.used, e);
 }
 
 export function fmtDur(ms: number): string {

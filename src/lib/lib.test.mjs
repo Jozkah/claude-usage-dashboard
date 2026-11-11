@@ -48,8 +48,8 @@ test('headroom uses the tightest main window', () => {
 test('paceFor', () => {
   const now = Date.now();
   const w = (used, elapsed) => ({ key: 'five_hour', used, resetsAt: new Date(now + (1 - elapsed) * 5 * HOUR).toISOString() });
-  assert.equal(paceFor(w(90, 0.5), now).label, 'Burning fast');
-  assert.equal(paceFor(w(10, 0.5), now).label, 'Room to spare');
+  assert.equal(paceFor(w(90, 0.5), now).label, 'Over pace');
+  assert.equal(paceFor(w(10, 0.5), now).label, 'Under pace');
   assert.equal(paceFor(w(50, 0.5), now).label, 'On pace');
   assert.equal(paceFor(w(50, 0.01), now), null);
 });
@@ -160,7 +160,7 @@ test('planTier maps Claude and Codex plan names to colour tiers', () => {
   assert.equal(planTier('Mystery'), 'unknown');
 });
 
-import { checkpoints, paceInfo, valueAt } from './pace.ts';
+import { checkpoints, paceBand, paceInfo, valueAt } from './pace.ts';
 
 test('checkpoints: a block per day, today since the last midnight', () => {
   const now = new Date(2026, 10, 11, 15, 0).getTime(); // Wed 15:00
@@ -231,7 +231,7 @@ test('poolLimits: one row per limit, one segment per account, pooled mean and re
   assert.equal(Math.round(session.left), 63);   // (26 + 100) / 2
   assert.equal(Math.round(session.refill), 37);
   assert.equal(Math.round(session.resetIn / HOUR * 10) / 10, 2.5);
-  assert.equal(session.pace.label, 'On pace'); // 37% used against a mean of 25% of the window gone, inside the 12-point band
+  assert.equal(session.pace.label, 'Over pace'); // 37% used against a mean of 25% of the window gone: 12 points ahead
 });
 
 test('poolLimits groups providers separately and skips expired windows; initials', () => {
@@ -245,4 +245,12 @@ test('poolLimits groups providers separately and skips expired windows; initials
   assert.equal(initials('Work (Shared)'), 'WS');
   assert.equal(initials('Work 2'), 'W2');
   assert.equal(initials('Codex'), 'CO');
+});
+
+test('paceBand is the shared pace rule: 8 points either side of even pacing is on pace', () => {
+  assert.equal(paceBand(58, 0.5).label, 'On pace');
+  assert.equal(paceBand(59, 0.5).label, 'Over pace');
+  assert.equal(paceBand(42, 0.5).label, 'On pace');
+  assert.equal(paceBand(41, 0.5).label, 'Under pace');
+  assert.equal(paceBand(41, 0.5).tone, 'good');
 });

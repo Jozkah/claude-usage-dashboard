@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { Account } from '../lib/types';
 import { fmtDur } from '../lib/format';
 import { poolLimits, type PoolRow, type Segment } from '../lib/pool';
+import { paceBand } from '../lib/pace';
 import { ProviderIcon, providerOf, type Provider } from './ProviderIcon';
 
 const LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok Build', cursor: 'Cursor', opencode: 'OpenCode' };
@@ -13,8 +14,8 @@ function AccountLine({ s, now, color, onPick }: { s: Segment; now: number; color
   const left = s.left == null ? null : Math.round(s.left);
   const tick = s.elapsed == null ? null : Math.min(100, Math.max(0, 100 - s.elapsed * 100));
   const reset = s.resetAt == null ? null : fmtDur(s.resetAt - now);
-  const diff = s.left != null && s.elapsed != null && s.elapsed >= 0.03 ? 100 - s.left - s.elapsed * 100 : null;
-  const pace = diff == null ? null : diff > 12 ? { t: 'Over pace', tone: 'bad' } : diff < -12 ? { t: 'Under pace', tone: 'good' } : { t: 'On pace', tone: 'mute' };
+  const band = s.left != null && s.elapsed != null && s.elapsed >= 0.03 ? paceBand(100 - s.left, s.elapsed) : null;
+  const pace = band ? { t: band.label, tone: band.tone } : null;
   return (
     <button
       onClick={() => onPick(s.account.id)}
@@ -29,7 +30,7 @@ function AccountLine({ s, now, color, onPick }: { s: Segment; now: number; color
           <span className="relative block h-[7px] rounded-[3px] bg-frame">
             <span className="absolute inset-y-0 left-0 rounded-[3px]" style={{ width: `${s.left}%`, background: color, transition: 'width 0.5s var(--ease-out-expo)' }} />
             {tick != null && tick > 0 && tick < 100 && (
-              <span title="Where even pacing would be" aria-hidden="true" className="absolute -inset-y-[3px] w-px bg-fg" style={{ left: `${tick}%` }} />
+              <span title={`Even pace: ${Math.round(tick)}% left by now`} aria-hidden="true" className="absolute -inset-y-[3px] w-px bg-fg" style={{ left: `${tick}%` }} />
             )}
           </span>
         )}

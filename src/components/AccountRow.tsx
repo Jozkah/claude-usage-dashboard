@@ -3,7 +3,7 @@ import { ChevronDown, EllipsisVertical, KeyRound, TriangleAlert, Trash2, WifiOff
 import { ProviderIcon, providerOf } from './ProviderIcon';
 import { planClasses } from '../lib/plan';
 import type { Account, UsageWindow } from '../lib/types';
-import { colorVar, isIdle, levelFor, mainWindows } from '../lib/format';
+import { colorVar, fmtAgo, isIdle, levelFor, mainWindows } from '../lib/format';
 import { accountReset } from '../lib/reset';
 import { useNow } from '../lib/api';
 import { LONG_PRESS_MS, movedTooFar } from '../lib/keyboard';
@@ -103,14 +103,15 @@ export function AccountRow({ account: a, now, best = false, onRemove, onLogin, o
     onPointerCancel: cancelPress,
   } : {};
 
+  const signIn = async () => {
+    setSigningIn(true);
+    setLoginError(null);
+    try { await onLogin(a); } catch (error) { setLoginError(error instanceof Error ? error.message : 'Could not start sign-in.'); }
+    finally { setSigningIn(false); }
+  };
   const loginButton = needsLogin && (
     <div className="mt-3">
-      <button disabled={signingIn} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-fg transition-transform active:scale-[0.96] disabled:opacity-50" onClick={async () => {
-        setSigningIn(true);
-        setLoginError(null);
-        try { await onLogin(a); } catch (error) { setLoginError(error instanceof Error ? error.message : 'Could not start sign-in.'); }
-        finally { setSigningIn(false); }
-      }}>{signingIn ? 'Opening sign-in…' : 'Sign in for usage'}</button>
+      <button disabled={signingIn} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-fg transition-transform active:scale-[0.96] disabled:opacity-50" onClick={() => void signIn()}>{signingIn ? 'Opening sign-in…' : 'Sign in for usage'}</button>
       {loginError && <p role="alert" className="mt-2 text-xs text-bad">{loginError}</p>}
     </div>
   );
@@ -208,9 +209,22 @@ export function AccountRow({ account: a, now, best = false, onRemove, onLogin, o
           </button>
         </div>
         <div className="col-span-2 grid min-w-0 gap-5 md:col-span-1 md:col-start-2 md:row-start-1">
-          {bars.map(([w, l]) => <UsageBar key={w.key} w={w} label={l} account={a} now={now} />)}
+          {a.stale && (
+            <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-warn/10 px-3 py-2 text-[12.5px]">
+              <span className="font-semibold text-warn">Not live</span>
+              <span className="min-w-0 flex-1 text-muted-fg">Last read {fmtAgo(now - a.fetchedAt)}{a.staleMessage ? `. ${a.staleMessage}` : '.'}</span>
+              {needsLogin && (
+                <button disabled={signingIn} onClick={() => void signIn()} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-fg transition-transform active:scale-[0.96] disabled:opacity-50">
+                  {signingIn ? 'Opening…' : 'Sign in'}
+                </button>
+              )}
+              {loginError && <span role="alert" className="basis-full text-xs text-bad">{loginError}</span>}
+            </div>
+          )}
+          <div className={`grid gap-5 ${a.stale ? 'opacity-55' : ''}`}>
+            {bars.map(([w, l]) => <UsageBar key={w.key} w={w} label={l} account={a} now={now} />)}
+          </div>
           {!week && weeklyPending && <p className="text-[12.5px] text-subtle-fg">Weekly limit: {needsLogin ? 'sign in to check it' : 'checked with the next usage update'}.</p>}
-          {a.stale && <p className="text-[11.5px] leading-relaxed text-subtle-fg">Last read {new Date(a.fetchedAt).toLocaleString()}{a.staleMessage ? ` · ${a.staleMessage}` : ''}</p>}
         </div>
       </div>
       {open && (

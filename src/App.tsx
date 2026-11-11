@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { Hourglass, Plus, WifiOff, X } from 'lucide-react';
+import { Copy, Hourglass, Link2, LogIn, MessagesSquare, Monitor, Plus, RefreshCw, Tags, Terminal, Trash2, Users, WifiOff, X } from 'lucide-react';
 import { openClaude, removeAccount, setTeamSeat, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
@@ -81,42 +81,48 @@ export default function App() {
   };
 
   const menuActions = (target: Account): MenuAction[] => {
+    const account: MenuAction[] = [];
+    const needsLogin = ['no_login', 'expired'].includes(target.authStatus ?? target.status);
+    if (target.provider !== 'cursor') {
+      account.push({
+        group: 'Account', icon: <LogIn />, label: needsLogin ? 'Sign in for usage' : 'Sign in again',
+        hint: target.provider ? 'Opens the service\u2019s own sign-in in a terminal window.' : 'Opens Claude Code\u2019s sign-in. Usage refreshes by itself afterwards.',
+        run: () => void runAction(async () => { await signInForUsage(target); return `Sign-in opened for ${target.name}.`; }, 'Could not start sign-in.'),
+      });
+    }
+    account.push({ group: 'Account', icon: <Trash2 />, label: 'Remove from dashboard', hint: 'Its login and files are not touched.', danger: true, run: () => { setContextAccount(null); setToRemove(target); } });
+
     if (target.provider) {
       const product = target.provider === 'grok' ? 'Grok' : target.provider === 'cursor' ? 'Cursor' : target.provider === 'opencode' ? 'OpenCode' : 'Codex';
-      if (target.provider === 'cursor') return [];
-      return [{ label: `Open ${product} as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name, product), `Could not open ${product}.`) }];
+      const open: MenuAction[] = target.provider === 'cursor' ? [] : [{ group: 'Open', icon: <Terminal />, label: `Open ${product} as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name, product), `Could not open ${product}.`) }];
+      return [...open, ...account];
     }
+
     const claude = accounts.filter((a) => !a.provider);
     const out: MenuAction[] = [
-      { label: `Open Claude Code as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name), 'Could not open Claude Code.') },
-      { label: `Open Claude Desktop as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'desktop', target.name), 'Could not open Claude Desktop.') },
+      { group: 'Open', icon: <Terminal />, label: 'Open Claude Code', hint: `In a new terminal as ${target.name}.`, run: () => void runAction(() => openClaude(target.id, 'code', target.name), 'Could not open Claude Code.') },
+      { group: 'Open', icon: <Monitor />, label: 'Open Claude Desktop', hint: 'Its Desktop login is separate: log out in Desktop once, then sign in to this account.', run: () => void runAction(() => openClaude(target.id, 'desktop', target.name), 'Could not open Claude Desktop.') },
     ];
-    if (/^Team\b/i.test(target.plan ?? '')) {
-      for (const seat of ['standard', 'premium'] as const) {
-        out.push({ label: `Mark seat ${seat === 'standard' ? 'Standard' : 'Premium'}`, run: () => void runAction(async () => {
-          const message = await setTeamSeat(target.id, seat);
-          await refresh(true);
-          return message;
-        }, 'Could not save Team seat.') });
-      }
-      if (target.seatTier) out.push({ label: 'Clear seat label', run: () => void runAction(async () => {
-        const message = await setTeamSeat(target.id, null);
-        await refresh(true);
-        return message;
-      }, 'Could not clear Team seat.') });
-    }
     // source for chat sharing: the 'personal' account when present, otherwise any other account
     const source = claude.find((a) => a.id === 'personal' && a.id !== target.id) ?? claude.find((a) => a.id !== target.id);
-    if (!source) return out;
-    out.push(
-      { label: 'Sync all accounts (chats, skills, plugins)', run: () => void runAction(syncAllAccounts, 'Could not sync the accounts.') },
-      { label: `Share ${source.name} CLI chats with ${target.name}`, run: () => void runAction(() => shareLocalChats(source.id, target.id, target.name), 'Could not share local chats.') },
-      { label: 'Sync local Desktop chats across profiles', run: () => void runAction(syncDesktopChats, 'Could not sync Desktop sessions.') },
-      { label: 'Sync Desktop chat names and groups', run: () => void runAction(syncDesktopLabels, 'Could not sync Desktop names and groups.') },
-    );
-    const from = claude.find((a) => a.id === 'personal' && a.id !== target.id) ?? source;
-    out.push({ label: 'Copy local Code plugins and skills…', run: () => { setContextAccount(null); setSetup({ open: true, sourceId: from.id, targetId: target.id }); } });
-    return out;
+    if (source) {
+      out.push(
+        { group: 'Sync', icon: <RefreshCw />, label: 'Sync all accounts', hint: 'Chats, skills, commands, agents and plugins.', run: () => void runAction(syncAllAccounts, 'Could not sync the accounts.') },
+        { group: 'Sync', icon: <Link2 />, label: `Share ${source.name} chats here`, hint: 'Links its Claude Code chat history into this account.', run: () => void runAction(() => shareLocalChats(source.id, target.id, target.name), 'Could not share local chats.') },
+        { group: 'Sync', icon: <MessagesSquare />, label: 'Sync Desktop chats', hint: 'Across every Claude Desktop profile.', run: () => void runAction(syncDesktopChats, 'Could not sync Desktop sessions.') },
+        { group: 'Sync', icon: <Tags />, label: 'Sync Desktop names and groups', run: () => void runAction(syncDesktopLabels, 'Could not sync Desktop names and groups.') },
+        { group: 'Sync', icon: <Copy />, label: 'Copy plugins and skills…', hint: 'Pick what to copy from another account.', run: () => { setContextAccount(null); setSetup({ open: true, sourceId: source.id, targetId: target.id }); } },
+      );
+    }
+    if (/^Team\b/i.test(target.plan ?? '')) {
+      const seat = (tier: 'standard' | 'premium' | null, label: string) => ({
+        group: 'Team seat', icon: <Users />, label, checked: target.seatTier === (tier ?? undefined) && tier !== null,
+        run: () => void runAction(async () => { const message = await setTeamSeat(target.id, tier); await refresh(true); return message; }, 'Could not save Team seat.'),
+      });
+      out.push(seat('standard', 'Standard seat'), seat('premium', 'Premium seat'));
+      if (target.seatTier) out.push({ ...seat(null, 'Clear seat label'), icon: <X /> });
+    }
+    return [...out, ...account];
   };
 
   const signInForUsage = useCallback(async (account: Account) => {
