@@ -4,13 +4,23 @@ import { ProviderIcon, providerOf } from './ProviderIcon';
 import { Countdown } from './Countdown';
 import type { Account, UsageWindow } from '../lib/types';
 import { colorVar, elapsedFraction, fmtAgo, levelFor, mainWindows } from '../lib/format';
-import { checkpoints } from '../lib/pace';
+import { checkpoints, paceInfo } from '../lib/pace';
 import { accountReset } from '../lib/reset';
 import { useHistory, useNow } from '../lib/api';
 
 const SHORT: Record<string, string> = { five_hour: '5 hour', seven_day: 'Weekly' };
 const label = (w: UsageWindow) => SHORT[w.key] ?? w.label.replace(/ · all models$/i, '');
 const R = 22, C = 2 * Math.PI * R;
+/** Dash pattern that is empty up to `from`, dashed up to `to`, then empty again (pathLength is 100). */
+function dashes(from: number, to: number) {
+  const n = Math.max(1, Math.floor((to - from) / 2.4));
+  const parts = [0, from];
+  for (let i = 0; i < n; i++) parts.push(1.2, 1.2);
+  const used = parts.reduce((x, y) => x + y, 0);
+  parts.push(0, Math.max(0, 100 - used));
+  return parts.join(' ');
+}
+const pct = (n: number) => (n < 0.05 ? '0%' : `${n >= 10 ? Math.round(n) : n.toFixed(1)}%`);
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**
@@ -21,8 +31,11 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
   const weekly = w.key.startsWith('seven_day');
   const hist = useHistory(account.id, w.key, weekly ? '7d' : '6h', account.fetchedAt || 0);
   const cp = useMemo(() => (hist.ready ? checkpoints(hist.points, w, now) : null), [hist.ready, hist.points, w, now]);
+  const pace = useMemo(() => (hist.ready ? paceInfo(hist.points, w, now) : null), [hist.ready, hist.points, w, now]);
   const used = Math.max(0, Math.min(100, w.used));
   const left = Math.round(100 - used);
+  const proj = pace?.projected != null ? Math.min(100, pace.projected) : null;
+  const bad = pace?.tone === 'bad';
   const e = elapsedFraction(w, now);
   const level = levelFor(used);
 
@@ -51,6 +64,11 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
           <circle cx="26" cy="26" r={R} fill="none" stroke="var(--frame)" strokeWidth="4" />
           {arcs.length ? arcs.map((x, i) => seg(x.from, x.to, x.today ? 'var(--signal)' : 'var(--subtle-fg)', x.today ? { filter: 'drop-shadow(0 0 3px var(--glow))' } : { opacity: i % 2 ? 0.45 : 0.62 }, x.title, i))
             : seg(0, used, level === 'good' ? 'var(--signal)' : colorVar(level))}
+          {proj != null && proj > used + 0.5 && (
+            <circle cx="26" cy="26" r={R} fill="none" stroke={bad ? 'var(--bad)' : 'var(--subtle-fg)'} strokeWidth="3" pathLength={100} strokeDasharray={dashes(used, proj)} opacity="0.9">
+              <title>{`Projected: ${Math.round(proj)}% by the reset`}</title>
+            </circle>
+          )}
           {tickAngle != null && (
             <line x1={26 + (R - 5) * Math.cos(tickAngle)} y1={26 + (R - 5) * Math.sin(tickAngle)} x2={26 + (R + 5) * Math.cos(tickAngle)} y2={26 + (R + 5) * Math.sin(tickAngle)} stroke="var(--fg)" strokeWidth="1.6" strokeLinecap="round" opacity="0.8"><title>Even pace</title></line>
           )}
@@ -58,6 +76,8 @@ function Ring({ w, account, now, dim }: { w: UsageWindow; account: Account; now:
         <span className={`absolute inset-0 grid place-items-center text-[14px] font-semibold tabular-nums ${level === 'bad' ? 'text-bad' : ''}`}>{left}</span>
       </div>
       <span className="text-[11.5px] text-subtle-fg">{label(w)}</span>
+      {cp?.sinceLast != null && <span className="text-[11px] font-semibold text-signal tabular-nums">{cp.unit === 'day' ? 'Today' : 'This hour'} +{pct(cp.sinceLast)}</span>}
+      {pace && <span className={`max-w-[112px] truncate text-[11px] font-semibold ${bad ? 'text-bad' : pace.tone === 'good' ? 'text-good' : pace.tone === 'warn' ? 'text-warn' : 'text-muted-fg'}`} title={`${pace.label}. ${pace.detail}`}>{pace.label.split(',')[0]}</span>}
     </div>
   );
 }
