@@ -55,7 +55,7 @@ export const TrendCard = memo(function TrendCard({ accounts, preferredId, tick, 
     `rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${active ? 'bg-card text-fg shadow-sm' : 'text-muted-fg hover:text-fg'}`;
 
   const right = (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <div role="group" aria-label="Time range" className="flex rounded-lg border border-line bg-frame p-0.5">
         {(['6h', '24h', '7d'] as RangeKey[]).map((r) => (
           <button key={r} onClick={() => onRange(r)} aria-pressed={range === r} className={seg(range === r)}>{r}</button>
@@ -72,7 +72,7 @@ export const TrendCard = memo(function TrendCard({ accounts, preferredId, tick, 
     <FrameCard icon={<TrendingUp className="size-3.5 text-subtle-fg" />} title="Usage trend" right={right} delay={60} className="h-full">
       <div className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="text-[32px] leading-none font-semibold tracking-tight" style={{ color: win && !showAll ? colorVar(levelFor(win.used)) : undefined }}>
               {showAll ? `${okAccounts.length} accounts` : win ? <AnimatedNumber value={win.used} suffix="%" /> : '—'}
             </div>
@@ -80,9 +80,9 @@ export const TrendCard = memo(function TrendCard({ accounts, preferredId, tick, 
               {showAll ? `Recorded usage for every account${win ? ` · limit: ${win.label}` : ''}` : win ? <>now · peak <span className="font-medium text-fg">{Math.round(peak)}%</span> in this range</> : 'No data yet'}
             </div>
           </div>
-          <div className="flex gap-2">
-            <Select label="Account" value={showAll ? 'all' : acc?.id ?? ''} onChange={setAccId} options={[{ value: 'all', label: 'All accounts' }, ...okAccounts.map((a) => ({ value: a.id, label: a.name }))]} />
-            <Select label="Limit" value={win?.key ?? ''} onChange={setKey} options={(showAll ? [...new Map(okAccounts.flatMap((a) => a.windows ?? []).map((w) => [w.key, w])).values()] : windows).map((w) => ({ value: w.key, label: w.label }))} />
+          <div className="flex min-w-0 max-w-full flex-wrap gap-2">
+            <Select label="Account" className="min-w-0 max-w-full" value={showAll ? 'all' : acc?.id ?? ''} onChange={setAccId} options={[{ value: 'all', label: 'All accounts' }, ...okAccounts.map((a) => ({ value: a.id, label: a.name }))]} />
+            <Select label="Limit" className="min-w-0 max-w-full" value={win?.key ?? ''} onChange={setKey} options={(showAll ? [...new Map(okAccounts.flatMap((a) => a.windows ?? []).map((w) => [w.key, w])).values()] : windows).map((w) => ({ value: w.key, label: w.label }))} />
           </div>
         </div>
         <div className="mt-4">

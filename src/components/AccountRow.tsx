@@ -159,8 +159,8 @@ export function AccountRow({ account: a, now, best = false, onRemove, onLogin, o
         <div className="flex flex-wrap items-center gap-2 text-base font-semibold tracking-tight">
           <span className="truncate">{a.name}</span>{badge}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 truncate text-[12.5px] text-subtle-fg">
-          {broken ? <span className="size-[7px] rounded-full bg-warn" /> : isIdle(a) ? <span className="idle-dot !size-[7px]" title="Idle: nothing used in the current windows" /> : <span className="live-dot !size-[7px]" />}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[12.5px] text-subtle-fg">
+          <span className="grid size-3.5 shrink-0 place-items-center">{broken ? <span className="size-[7px] rounded-full bg-warn" /> : isIdle(a) ? <span className="idle-dot !size-[7px]" title="Idle: nothing used in the current windows" /> : <span className="live-dot !size-[7px]" />}</span>
           <span className="truncate">{chatSummary(a)} · {a.configDir}</span>
         </div>
       </div>

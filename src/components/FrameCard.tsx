@@ -41,7 +41,7 @@ export function FrameCard({ icon, title, right, children, className = '', bodyCl
       className={`panel animate-rise flex min-w-0 flex-col ${className}`}
       style={{ animationDelay: `${delay}ms` }}
     >
-      <header className="flex min-h-12 items-center justify-between gap-3 px-5 pt-3 text-[13.5px] font-semibold tracking-tight text-fg">
+      <header className="flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-5 pt-3 text-[13.5px] font-semibold tracking-tight text-fg">
         <div className="flex min-w-0 items-center gap-2">
           {icon}
           <span className="truncate">{title}</span>

@@ -128,7 +128,9 @@ export const UsageChart = memo(function UsageChart({ points, range, mode, series
     return { line, fill };
   }, [points, xT, y, plotH]);
 
-  const ticks = useMemo(() => Array.from({ length: 6 }, (_, i) => from + (span * (i + 0.5)) / 6), [from, span]);
+  // fewer labels on narrow charts so neighbouring times never run into each other
+  const tickCount = Math.max(2, Math.min(6, Math.floor(plotW / 96)));
+  const ticks = useMemo(() => Array.from({ length: tickCount }, (_, i) => from + (span * (i + 0.5)) / tickCount), [from, span, tickCount]);
   const lastV = points.length ? points[points.length - 1][1] : 0;
   const peakV = points.reduce((m, p) => Math.max(m, p[1]), 0);
   const summary = points.length

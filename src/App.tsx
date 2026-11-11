@@ -242,13 +242,13 @@ export default function App() {
               <section id="accounts" className="mt-8 scroll-mt-16">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
                   <h2 className="text-[18px] font-bold tracking-[-0.02em]">Accounts</h2>
-                  <div className="flex items-center gap-2">
+                  <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
                     {accounts.length > 1 && (
-                      <div role="group" aria-label="Show accounts" className="flex rounded-lg border border-line bg-frame p-0.5 text-[12.5px]">
+                      <div role="group" aria-label="Show accounts" className="flex max-w-full min-w-0 overflow-x-auto rounded-lg border border-line bg-frame p-0.5 text-[12.5px]">
                         {[{ id: 'all', name: 'All' }, ...accounts].map((a) => (
                           <button
                             key={a.id} onClick={() => select(a.id)} aria-pressed={selected === a.id}
-                            className={`relative max-w-[120px] truncate rounded-md px-2.5 py-1 font-medium transition-[color,background-color] duration-150 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] ${selected === a.id ? 'bg-card text-fg shadow-[0_1px_2px_rgba(0,0,0,0.12)]' : 'text-muted-fg hover:text-fg'}`}
+                            className={`relative max-w-[120px] shrink-0 truncate rounded-md px-2.5 py-1 font-medium transition-[color,background-color] duration-150 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] ${selected === a.id ? 'bg-card text-fg shadow-[0_1px_2px_rgba(0,0,0,0.12)]' : 'text-muted-fg hover:text-fg'}`}
                           >
                             {a.name}
                           </button>

@@ -82,8 +82,8 @@ export function UsageBar({ w, label, account, now }: Props) {
         {proj != null && proj > used + 0.5 && (
           <span
             title={`Projected: ${pctText(proj)} by the reset`}
-            className="absolute inset-y-0 rounded-r-[4px] opacity-60"
-            style={{ left: `${used}%`, width: `${proj - used}%`, background: `repeating-linear-gradient(135deg, ${pace?.tone === 'bad' ? 'var(--bad)' : 'var(--fg)'} 0 2px, transparent 2px 5px)` }}
+            className="absolute inset-y-0 rounded-r-[4px] border-y border-r border-dashed"
+            style={{ left: `${used}%`, width: `${proj - used}%`, borderColor: pace?.tone === 'bad' ? 'var(--bad)' : 'var(--subtle-fg)', background: `color-mix(in srgb, ${pace?.tone === 'bad' ? 'var(--bad)' : 'var(--fg)'} 8%, transparent)` }}
           />
         )}
         {e != null && (
