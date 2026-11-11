@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timetable: usage dashboard direction</title>
+<link rel="icon" href="data:,">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bed:#e2ac35;--ivory:#f7f0da;--carbon:#1a1915;--slate:#3a4651;--red:#d23b25;--green:#1d5b43;--rule:#1a1915}
+*{box-sizing:border-box;margin:0}
+html{background:var(--bed);color:var(--carbon);font-family:"Barlow Semi Condensed",sans-serif;font-size:14px;line-height:1.35;-webkit-font-smoothing:antialiased}
+/* one size for everything: rank is weight, case, reversal and rule */
+body{padding:28px 20px 80px}
+.wrap{max-width:1060px;margin:0 auto;display:grid;gap:18px}
+.cap{text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:3px solid var(--carbon);padding-bottom:8px}
+.top h1{font:inherit;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.plate{background:var(--carbon);color:var(--ivory);padding:8px 12px;display:flex;gap:16px;justify-content:space-between;align-items:center}
+.plate b{font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.pane{background:var(--ivory);border-top:4px solid var(--carbon)}
+.pane > h2{font:inherit;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:8px 12px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between}
+.pane > h2 span{font-weight:400;text-transform:none;letter-spacing:0}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:6px 12px;border-bottom:1px solid var(--rule)}
+td{padding:7px 12px;border-bottom:1px solid color-mix(in srgb,var(--carbon) 22%,transparent);vertical-align:middle}
+td.r,th.r{text-align:right}
+tr:last-child td{border-bottom:0}
+.mark{display:inline-block;width:10px;height:10px;border:2px solid var(--carbon);margin-right:8px;vertical-align:-1px}
+.mark.on{background:var(--carbon)}.mark.void{background:var(--red);border-color:var(--red)}.mark.ok{background:var(--green);border-color:var(--green)}
+.bold{font-weight:700}.red{color:var(--red)}.green{color:var(--green)}.dim{opacity:.62}
+.bar{position:relative;height:14px;background:color-mix(in srgb,var(--carbon) 12%,transparent);min-width:140px;display:flex}
+.bar i{display:block;height:100%;background:var(--carbon);box-shadow:inset -2px 0 0 var(--ivory)}
+.bar i.today{background:var(--red)}
+.bar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--slate)}
+.grp td:first-child{width:170px}
+.prov{background:var(--slate);color:var(--ivory);padding:4px 12px;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.two{display:grid;grid-template-columns:1.6fr 1fr;gap:18px}
+@media(max-width:820px){.two{grid-template-columns:1fr}.bar{min-width:90px}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="../shared/data.js"></script>
+<script src="common.js"></script>
+<script>
+const D = window.DASH, $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild; };
+const best = D.best();
+const bar = (r) => {
+  const left = 100 - r.used, blocks = r.marks.map((m, i) => (i ? m - r.marks[i - 1] : m));
+  const total = r.used;
+  return `<div class="bar" role="img" aria-label="${r.label}: ${left}% left">${blocks.map((w, i) => `<i class="${i === blocks.length - 1 ? 'today' : ''}" style="width:${w}%"></i>`).join('')}<b style="left:${r.elapsed * 100}%" title="Even pace"></b></div>`;
+};
+const rowFor = (a, k) => D.limitRows.find((r) => r.a === a && r.k === k);
+const cell = (r) => !r ? '<td class="dim">no reading</td><td></td>' : `<td>${bar(r)}</td><td class="r num bold ${100 - r.used < 20 ? 'red' : ''}">${100 - r.used}%</td>`;
+const status = (r) => !r ? '' : r.used >= 90 ? '<span class="mark void"></span>FULL' : r.used > r.elapsed * 100 + 8 ? '<span class="mark on"></span>OVER PACE' : '<span class="mark ok"></span>HOLDS';
+document.getElementById('app').append(
+  $(`<div class="top"><h1>Usage timetable</h1><span class="cap num">Valid ${new Date().toLocaleDateString('en',{day:'numeric',month:'short'})} · sample data</span></div>`),
+  $(`<div class="plate"><span class="cap">Most room</span><b>${best.name}</b><span class="num">${D.left(best)}% left on the tightest limit</span></div>`),
+  $(`<div class="two"><div class="pane"><h2>Next resets <span>listed like departures</span></h2><table><thead><tr><th>Account</th><th>Limit</th><th class="r">Resets in</th><th class="r">Time</th><th>Status</th></tr></thead><tbody>${
+    D.nextResets.slice(0, 7).map((r) => `<tr><td class="bold">${r.a.name}</td><td>${r.label}</td><td class="r num">${r.reset}</td><td class="r num">${r.mins > 1440 ? D.day(r.mins) + ' ' : ''}${D.clock(r.mins)}</td><td>${status(r)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="pane"><h2>Legend</h2><table><tbody>
+      <tr><td><span class="mark ok"></span>Holds</td><td>on or under even pace</td></tr>
+      <tr><td><span class="mark on"></span>Over pace</td><td>8 points ahead of time</td></tr>
+      <tr><td><span class="mark void"></span>Full</td><td>90% used or more</td></tr>
+      <tr><td><b style="display:inline-block;width:2px;height:12px;background:var(--slate);margin:0 9px 0 4px;vertical-align:-2px"></b>Tick</td><td>even pace</td></tr>
+      <tr><td><span style="display:inline-block;width:14px;height:10px;background:var(--red);margin-right:8px"></span>Red block</td><td>used since the last checkpoint</td></tr>
+    </tbody></table></div></div>`),
+  ...D.byProvider.map((g) => $(`<div class="pane"><h2>${g.name} <span>limits, one line per account. Bar = used, split at day checkpoints</span></h2><table class="grp"><thead><tr><th>Account</th><th>Session</th><th class="r">Left</th><th>Weekly</th><th class="r">Left</th></tr></thead><tbody>${
+    g.accounts.map((a) => `<tr><td class="bold">${a.name}<div class="dim" style="font-weight:400">${a.plan} · ${a.chats.length} open chat${a.chats.length === 1 ? '' : 's'}</div></td>${cell(rowFor(a, 'five'))}${cell(rowFor(a, 'week'))}</tr>`).join('')}</tbody></table></div>`)),
+);
+</script>
+</body>
+</html>

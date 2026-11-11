@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mono: usage dashboard direction</title>
+<link rel="icon" href="data:,">
+<link href="https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fafafa;--panel:#fff;--line:#e4e4e7;--fg:#09090b;--mute:#71717a;--accent:#2457ff;--soft:#f1f1f3}
+*{box-sizing:border-box;margin:0}
+html{background:var(--bg);color:var(--fg);font-family:"Albert Sans",sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{padding:0 0 80px}
+.num{font-variant-numeric:tabular-nums}
+nav{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 28px;border-bottom:1px solid var(--line);background:var(--panel)}
+nav b{font-weight:700;letter-spacing:-.01em}
+nav span{color:var(--mute)}
+main{max-width:1060px;margin:0 auto;padding:36px 28px;display:grid;gap:36px}
+h1{font-size:30px;font-weight:600;letter-spacing:-.03em}
+h1 em{font-style:normal;color:var(--accent)}
+.sub{color:var(--mute);margin-top:6px}
+h2{font-size:13px;font-weight:600;margin-bottom:10px}
+.tbl{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.hd,.tr{display:grid;grid-template-columns:1.2fr 1.6fr 60px 1.6fr 60px;gap:18px;align-items:center;padding:12px 18px}
+.hd{color:var(--mute);font-size:12px;border-bottom:1px solid var(--line);background:var(--soft)}
+.tr+.tr{border-top:1px solid var(--line)}
+.tr .n b{display:block;font-weight:600}.tr .n span{color:var(--mute);font-size:12px}
+.track{position:relative;height:6px;background:var(--soft);border-radius:3px;display:flex}
+.track i{display:block;height:100%;background:#a1a1aa;border-right:2px solid var(--panel)}
+.track i:first-child{border-radius:3px 0 0 3px}
+.track i.today{background:var(--accent);border-radius:0 3px 3px 0;border-right:0}
+.track b{position:absolute;top:-4px;bottom:-4px;width:1.5px;background:var(--fg)}
+.pct{text-align:right;font-weight:600}
+.pct.bad{color:#d92d20}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:14px 16px}
+.card small{color:var(--mute);display:block}
+.card b{font-size:20px;font-weight:600;letter-spacing:-.02em}
+.card span{color:var(--mute)}
+@media(max-width:760px){.hd{display:none}.tr{grid-template-columns:1fr 1fr}.tr .n{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<nav><b>Usage</b><span>sample data</span></nav>
+<main id="app"></main>
+<script src="../shared/data.js"></script>
+<script src="common.js"></script>
+<script>
+const D = window.DASH, $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild; };
+const best = D.best();
+const rowFor = (a, k) => D.limitRows.find((r) => r.a === a && r.k === k);
+const cell = (r) => {
+  if (!r) return '<span style="color:var(--mute)">no reading</span><span></span>';
+  const left = 100 - r.used, blocks = r.marks.map((m, i) => (i ? m - r.marks[i - 1] : m));
+  return `<div class="track" role="img" aria-label="${r.label} ${left}% left">${blocks.map((w, i) => `<i class="${i === blocks.length - 1 ? 'today' : ''}" style="width:${w}%"></i>`).join('')}<b style="left:${r.elapsed * 100}%"></b></div><span class="pct num ${left < 20 ? 'bad' : ''}">${left}%</span>`;
+};
+document.getElementById('app').append(
+  $(`<div><h1>Most room: <em>${best.name}</em></h1><p class="sub">${D.left(best)}% left on its tightest limit. Next reset ${D.nextResets[0].a.name}, ${D.nextResets[0].label.toLowerCase()}, in ${D.nextResets[0].reset}.</p></div>`),
+  $(`<div class="grid">${D.nextResets.slice(0, 4).map((r) => `<div class="card"><small>${r.a.name} · ${r.label}</small><b class="num">${D.clock(r.mins)}</b> <span>in ${r.reset}</span></div>`).join('')}</div>`),
+  ...D.byProvider.map((g) => $(`<section><h2>${g.name}</h2><div class="tbl"><div class="hd"><span>Account</span><span>Session</span><span style="text-align:right">Left</span><span>Weekly</span><span style="text-align:right">Left</span></div>${
+    g.accounts.map((a) => `<div class="tr"><div class="n"><b>${a.name}</b><span>${a.plan}</span></div>${cell(rowFor(a, 'five'))}${cell(rowFor(a, 'week'))}</div>`).join('')}</div></section>`)),
+);
+</script>
+</body>
+</html>

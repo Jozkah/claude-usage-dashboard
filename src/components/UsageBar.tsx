@@ -84,14 +84,14 @@ export function UsageBar({ w, label, account, now }: Props) {
             className="absolute inset-y-0 first:rounded-l-[4px]"
             style={{
               left: `${b.from}%`, width: `${Math.max(0.6, b.to - b.from)}%`,
-              background: b.today ? 'var(--signal)' : 'var(--fg)',
-              opacity: b.today ? 1 : i % 2 ? 0.62 : 0.85,
-              boxShadow: 'inset -1.5px 0 0 var(--card)',
-              borderRadius: b.to >= used - 0.01 ? '0 4px 4px 0' : undefined,
+              background: b.today ? 'var(--signal)' : 'var(--subtle-fg)',
+              opacity: b.today ? 1 : i % 2 ? 0.45 : 0.62,
+              boxShadow: b.today ? '0 0 14px var(--glow), inset -1.5px 0 0 var(--card)' : 'inset -1.5px 0 0 var(--card)',
+              borderRadius: `${b.from <= 0.01 ? 4 : 0}px ${b.to >= used - 0.01 ? 4 : 0}px ${b.to >= used - 0.01 ? 4 : 0}px ${b.from <= 0.01 ? 4 : 0}px`,
             }}
           />
         )) : (
-          <span className="absolute inset-y-0 left-0 rounded-[4px]" style={{ width: `${used}%`, background: level === 'good' ? 'var(--fg)' : colorVar(level), transition: 'width 0.5s var(--ease-out-expo)' }} />
+          <span className="absolute inset-y-0 left-0 rounded-[4px]" style={{ width: `${used}%`, background: level === 'good' ? 'var(--signal)' : colorVar(level), transition: 'width 0.5s var(--ease-out-expo)' }} />
         )}
         {proj != null && proj > used + 0.5 && (
           <span

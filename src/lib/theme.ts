@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const THEME_COLORS = { light: '#f8f8f8', dark: '#09090b' };
+const THEME_COLORS = { light: '#fbfbfd', dark: '#09090b' };
 
 function apply(dark: boolean) {
   document.documentElement.classList.toggle('dark', dark);
@@ -17,7 +17,7 @@ function saved(): 'dark' | 'light' | null {
 export function useTheme() {
   const [dark, setDark] = useState(() => {
     const t = saved();
-    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    return t ? t === 'dark' : true;
   });
 
   // keep the DOM (class + theme-color meta) in step with state

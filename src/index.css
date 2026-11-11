@@ -3,7 +3,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: "Onest Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --color-bg: var(--background);
   --color-card: var(--card);
   --color-frame: var(--frame);
@@ -18,59 +18,62 @@
   --color-bad: var(--bad);
   --color-accent: var(--accent);
   --color-signal: var(--signal);
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Ledger: a warm grey ground, white ruled panels, near-black ink and one signal orange for limits near the edge. */
+/* Aura: near-black ground, hairline panels, one violet that glows only where usage happened since the last checkpoint. */
 :root {
-  --background: #f2f2f0;
+  --background: #fbfbfd;
   --card: #ffffff;
-  --frame: #ecece8;
-  --line: #e3e3df;
-  --fg: #0d0d0c;
-  --muted-fg: #55554f;
-  --subtle-fg: #6b6b64;
-  --primary: #0d0d0c;
+  --frame: #f0f0f5;
+  --line: #e6e6ee;
+  --fg: #0c0c12;
+  --muted-fg: #4f4f5e;
+  --subtle-fg: #6b6b7b;
+  --primary: #0c0c12;
   --primary-fg: #ffffff;
-  --good: #0f7a4a;
+  --good: #0f8a55;
   --warn: #b45309;
-  --bad: #d63a12;
-  --accent: #0d0d0c;
-  --signal: #ff5a1f;
-  --claude: #c8623f;
-  --codex: #55554f;
-  --grok: #3b6ea8;
-  --cursor: #6a5acd;
-  --opencode: #2f7d6d;
-  --chart-bar: #e3e3df;
-  --chart-grid: #ecece8;
-  --shadow: 0 1px 0 rgba(13, 13, 12, 0.04), 0 8px 24px -12px rgba(13, 13, 12, 0.18);
+  --bad: #d92d20;
+  --accent: #6d4aff;
+  --signal: #6d4aff;
+  --claude: #6d4aff;
+  --codex: #3d6bff;
+  --grok: #2f2f3a;
+  --cursor: #c026d3;
+  --opencode: #1f9d7a;
+  --chart-bar: #e6e6ee;
+  --chart-grid: #efeff5;
+  --glow: rgba(109, 74, 255, 0.10);
+  --shadow: 0 1px 0 rgba(12, 12, 18, 0.04), 0 8px 24px -12px rgba(12, 12, 18, 0.16);
   color-scheme: light;
 }
 
 .dark {
-  --background: #121211;
-  --card: #1b1b19;
-  --frame: #262623;
-  --line: #2a2a27;
-  --fg: #f4f4f1;
-  --muted-fg: #b4b4ac;
-  --subtle-fg: #9a9a91;
-  --primary: #f4f4f1;
-  --primary-fg: #121211;
+  --background: #09090b;
+  --card: #111114;
+  --frame: #1a1a20;
+  --line: #222228;
+  --fg: #f4f4f5;
+  --muted-fg: #b0b0bb;
+  --subtle-fg: #8b8b95;
+  --primary: #f4f4f5;
+  --primary-fg: #09090b;
   --good: #3fd18a;
   --warn: #fbbf24;
-  --bad: #ff7a50;
-  --accent: #f4f4f1;
-  --signal: #ff6a3d;
-  --claude: #d97757;
-  --codex: #8a8a82;
-  --grok: #6c9bd6;
-  --cursor: #9a8cf0;
-  --opencode: #4fb59f;
-  --chart-bar: #262623;
-  --chart-grid: #222220;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --bad: #ff6b5c;
+  --accent: #b9a7ff;
+  --signal: #8d6cff;
+  --claude: #9b7dff;
+  --codex: #5b8aff;
+  --grok: #d4d4dc;
+  --cursor: #f08bff;
+  --opencode: #4fd1a8;
+  --chart-bar: #26262d;
+  --chart-grid: #1c1c22;
+  --glow: rgba(124, 92, 255, 0.22);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
   color-scheme: dark;
 }
 
@@ -78,7 +81,7 @@ html { scroll-padding-top: 64px; scrollbar-gutter: stable; scroll-behavior: smoo
 html, body, #root { min-height: 100%; }
 body {
   margin: 0;
-  background: var(--background);
+  background: radial-gradient(900px 420px at 50% -140px, var(--glow), transparent 70%) no-repeat, var(--background);
   color: var(--fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -104,8 +107,8 @@ body {
 .animate-grow { transform-origin: bottom; animation: grow-y 0.6s var(--ease-out-expo) both; }
 .animate-pop { animation: pop 0.3s var(--ease-out-expo) both; }
 
-/* Panels: one white rounded surface, no frame inside a frame. */
-.panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+/* Panels: one hairline surface. */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
 
 .live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--good); }
 .idle-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--subtle-fg); opacity: .7; }
