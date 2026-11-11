@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { Copy, Hourglass, Link2, LogIn, MessagesSquare, Monitor, Plus, RefreshCw, Tags, Terminal, Trash2, Users, WifiOff, X } from 'lucide-react';
+import { Copy, Hourglass, LayoutGrid, List, Link2, LogIn, MessagesSquare, Monitor, Plus, RefreshCw, Tags, Terminal, Trash2, Users, WifiOff, X } from 'lucide-react';
 import { openClaude, removeAccount, setTeamSeat, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
@@ -10,6 +10,7 @@ import { Header } from './components/Header';
 import { TrendCard } from './components/TrendCard';
 import { ResetTimeline } from './components/ResetTimeline';
 import { AccountRow } from './components/AccountRow';
+import { AccountTile } from './components/AccountTile';
 import { PooledLimits } from './components/PooledLimits';
 import { LazySection } from './components/LazySection';
 import { useScrollRestore } from './lib/scroll';
@@ -31,6 +32,8 @@ export default function App() {
   const effects = useEffectsPref();
 
   const [selected, setSelected] = useState('all');
+  const [view, setViewState] = useState<'list' | 'grid'>(() => { try { return localStorage.getItem('cud-accounts-view') === 'grid' ? 'grid' : 'list'; } catch { return 'list'; } });
+  const setView = (v: 'list' | 'grid') => { setViewState(v); try { localStorage.setItem('cud-accounts-view', v); } catch { /* private mode */ } };
   const [range, setRange] = useState<RangeKey>('24h');
   const [addOpen, setAddOpen] = useState(false);
   const [toRemove, setToRemove] = useState<Account | null>(null);
@@ -261,22 +264,40 @@ export default function App() {
                         ))}
                       </div>
                     )}
+                    <div role="group" aria-label="Account layout" className="flex rounded-lg border border-line bg-frame p-0.5">
+                      {([['list', List, 'List'], ['grid', LayoutGrid, 'Grid']] as const).map(([id, Icon, name]) => (
+                        <button key={id} onClick={() => setView(id)} aria-pressed={view === id} aria-label={`${name} view`} title={`${name} view`}
+                          className={`relative grid size-7 place-items-center rounded-md transition-[color,background-color] duration-150 after:absolute after:-inset-1 after:content-[''] ${view === id ? 'bg-card text-fg shadow-[0_1px_2px_rgba(0,0,0,0.12)]' : 'text-muted-fg hover:text-fg'}`}>
+                          <Icon className="size-4" />
+                        </button>
+                      ))}
+                    </div>
                     <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-[13px] font-semibold transition-[transform,border-color] duration-150 active:scale-[0.96] hover:border-fg/40">
                       <Plus className="size-3.5" /> Add account
                     </button>
                   </div>
                 </div>
-                <div className="panel overflow-hidden">
-                  {visible.map((a) => (
-                    <ErrorBoundary key={a.id} label={a.name}>
-                      <AccountRow
-                        account={a} now={now} best={!!best && best.id === a.id && selected === 'all'} onRemove={setToRemove} onLogin={signInForUsage}
-                        onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)} onLongPress={(x, y) => openMenuAt(a, x, y)}
-                      />
-                    </ErrorBoundary>
-                  ))}
-                  {visible.length === 0 && <div className="p-10 text-center text-sm text-muted-fg">No accounts yet. Use “Add account” to start.</div>}
-                </div>
+                {view === 'grid' && visible.length > 0 ? (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(212px,1fr))] gap-3">
+                    {visible.map((a) => (
+                      <ErrorBoundary key={a.id} label={a.name}>
+                        <AccountTile account={a} now={now} onContextMenu={(e) => openAccountMenu(a, e)} onOpen={(el) => openMenuFromButton(a, el)} />
+                      </ErrorBoundary>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="panel overflow-hidden">
+                    {visible.map((a) => (
+                      <ErrorBoundary key={a.id} label={a.name}>
+                        <AccountRow
+                          account={a} now={now} best={!!best && best.id === a.id && selected === 'all'} onRemove={setToRemove} onLogin={signInForUsage}
+                          onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)} onLongPress={(x, y) => openMenuAt(a, x, y)}
+                        />
+                      </ErrorBoundary>
+                    ))}
+                    {visible.length === 0 && <div className="p-10 text-center text-sm text-muted-fg">No accounts yet. Use “Add account” to start.</div>}
+                  </div>
+                )}
               </section>
 
               <section id="resets" className="mt-10 scroll-mt-16">
