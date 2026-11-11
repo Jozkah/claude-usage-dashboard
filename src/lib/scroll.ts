@@ -17,28 +17,6 @@ export function useNearViewport<T extends Element>(margin = 600) {
   return [ref, near] as const;
 }
 
-/**
- * Progressive list: shows `step` rows, and more each time the returned sentinel scrolls into view.
- * The count resets when `total` or `resetKey` changes so a new filter starts at the top.
- */
-export function useProgressive(total: number, step = 30, resetKey: unknown = null) {
-  const [count, setCount] = useState(step);
-  useEffect(() => { setCount(step); }, [total, step, resetKey]);
-  const more = count < total;
-  const io = useRef<IntersectionObserver | null>(null);
-  const sentinel = useCallback((el: Element | null) => {
-    io.current?.disconnect();
-    io.current = null;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    io.current = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) setCount((c) => c + step);
-    }, { rootMargin: '300px 0px' });
-    io.current.observe(el);
-  }, [step]);
-  useEffect(() => () => io.current?.disconnect(), []);
-  return { count: Math.min(count, total), more, sentinel, showAll: () => setCount(total) };
-}
-
 const KEY = 'cud-scroll';
 
 /** Remembers the scroll position across reloads and puts it back once the page has its content. */

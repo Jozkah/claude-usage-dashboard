@@ -5,6 +5,8 @@
 export const CLI_PROVIDERS = {
   codex: { label: 'Codex', command: 'codex', login: 'codex login', env: 'CODEX_HOME', folder: /^\.codex[\w-]*$/, example: '~/.codex-work' },
   grok: { label: 'Grok Build', command: 'grok', login: 'grok login', env: 'GROK_HOME', folder: /^\.grok[\w-]*$/, example: '~/.grok-work' },
+  // OpenCode's folder is its data directory (opencode.db, auth.json); it has no per-account environment variable.
+  opencode: { label: 'OpenCode', command: 'opencode', login: 'opencode auth login', env: null, folder: /^opencode[\w-]*$/, example: '~/.local/share/opencode' },
   // Cursor keeps no readable login: it is read with an API key from the server's environment (see cursor.js).
   cursor: { label: 'Cursor', command: null, login: null, env: null, folder: /^\.cursor[\w-]*$/, example: '~/.cursor-work' },
 };

@@ -63,7 +63,7 @@ async function postJson<T extends object>(url: string, fallback: string, body?: 
   return result;
 }
 
-export async function addAccount(name: string, configDir: string, provider?: 'codex' | 'grok' | 'cursor', create = false): Promise<string | null> {
+export async function addAccount(name: string, configDir: string, provider?: 'codex' | 'grok' | 'cursor' | 'opencode', create = false): Promise<string | null> {
   try {
     await postJson('/api/accounts', 'Could not add the account.', { name, configDir, ...(provider ? { provider } : {}), ...(create ? { create: true } : {}) });
     return null;

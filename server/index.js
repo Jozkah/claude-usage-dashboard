@@ -34,6 +34,7 @@ import { syncAllAccounts } from './account-sync.js';
 import { fetchCodexStatus } from './codex.js';
 import { fetchGrokStatus } from './grok.js';
 import { fetchCursorStatus } from './cursor.js';
+import { fetchOpenCodeStatus } from './opencode-go.js';
 import { CLI_PROVIDERS, isCliProvider, isClaudeAccount } from './cli-providers.js';
 import { createCodexSessionReader } from './codex-sessions.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
@@ -287,6 +288,11 @@ async function safeSessions(acc, paused = new Map()) {
 }
 
 async function fetchStatus(acc) {
+  if (acc.provider === 'opencode') {
+    const status = await fetchOpenCodeStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
+      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
+    return { ...status, configDir: acc.configDir };
+  }
   if (acc.provider === 'cursor') {
     const status = await fetchCursorStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
       { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });

@@ -9,12 +9,13 @@ interface Props {
   onAdded: () => void;
 }
 
-type Service = 'claude' | 'codex' | 'grok' | 'cursor';
+type Service = 'claude' | 'codex' | 'grok' | 'cursor' | 'opencode';
 const SERVICES: Record<Service, { label: string; product: string; folder: string; dir: string; env: string; login: string }> = {
   claude: { label: 'Claude Code', product: 'Claude Code', folder: 'Claude config folder', dir: '', env: 'CLAUDE_CONFIG_DIR', login: 'claude auth login' },
   codex: { label: 'Codex (ChatGPT plan)', product: 'Codex', folder: 'Codex folder', dir: '~/.codex', env: 'CODEX_HOME', login: 'codex login' },
   grok: { label: 'Grok Build', product: 'Grok', folder: 'Grok folder', dir: '~/.grok', env: 'GROK_HOME', login: 'grok login' },
   cursor: { label: 'Cursor', product: 'Cursor', folder: 'Cursor folder', dir: '~/.cursor', env: 'CURSOR_API_KEY', login: '' },
+  opencode: { label: 'OpenCode Go', product: 'OpenCode', folder: 'OpenCode data folder', dir: '~/.local/share/opencode', env: 'XDG_DATA_HOME', login: 'opencode auth login' },
 };
 
 const inputCls =
@@ -83,7 +84,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
           )}
         </p>
 
-        {service !== 'claude' && (
+        {service !== 'claude' && service !== 'opencode' && (
           <label className="mt-3 flex items-center gap-2 text-xs text-muted-fg">
             <input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />
             Create the folder if it does not exist (for a second {SERVICES[service].product} login, e.g. <code className="rounded bg-frame px-1">{SERVICES[service].dir}-work</code>)

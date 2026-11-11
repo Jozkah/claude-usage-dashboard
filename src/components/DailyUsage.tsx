@@ -1,11 +1,10 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Loader2 } from 'lucide-react';
 import { fetchTokens } from '../lib/api';
 import { modelName } from '../lib/format';
 import type { DayUsage, ModelPrice, NamedShare, TokenReport } from '../lib/types';
 import { FrameCard } from './FrameCard';
 import { Select } from './Select';
-import { useProgressive } from '../lib/scroll';
 
 function useTokens() {
   const [report, setReport] = useState<TokenReport | null>(null);
@@ -190,6 +189,56 @@ function ModelTable({ rows, prices, colorOf }: { rows: ModelRow[]; prices?: Reco
   );
 }
 
+const ROW_H = 34;
+const VIEW_H = 440;
+
+/**
+ * Day-by-day list in a fixed-height scroller that only draws the rows in view (plus a few), so the page height
+ * and the DOM stay the same however many days there are.
+ */
+function DayTable({ days }: { days: (DayUsage & { models: NamedShare[] })[] }) {
+  const [top, setTop] = useState(0);
+  const frame = useRef(0);
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const y = e.currentTarget.scrollTop;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => setTop(y));
+  };
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  const first = Math.max(0, Math.floor(top / ROW_H) - 8);
+  const last = Math.min(days.length, Math.ceil((top + VIEW_H) / ROW_H) + 8);
+  return (
+    <div>
+      <div onScroll={onScroll} tabIndex={0} role="region" aria-label="Day by day usage" style={{ maxHeight: VIEW_H }} className="overflow-y-auto rounded-lg border border-line [overscroll-behavior-y:auto]">
+        <table className="w-full text-[12.5px]">
+          <thead className="sticky top-0 z-10 bg-frame text-left text-[11.5px] text-muted-fg">
+            <tr>
+              <th className="px-3 py-1.5 font-medium">Date</th>
+              <th className="px-3 py-1.5 text-right font-medium">Tokens</th>
+              <th className="px-3 py-1.5 text-right font-medium">Est. cost</th>
+              <th className="hidden px-3 py-1.5 font-medium sm:table-cell">Main model</th>
+            </tr>
+          </thead>
+          <tbody>
+            {first > 0 && <tr aria-hidden="true" style={{ height: first * ROW_H }}><td colSpan={4} /></tr>}
+            {days.slice(first, last).map((d) => (
+              <tr key={d.date} style={{ height: ROW_H }} className="border-t border-line/70">
+                <td className="px-3 tabular-nums whitespace-nowrap">{d.date}</td>
+                <td className="px-3 text-right tabular-nums">{tok(d.total)}</td>
+                <td className="px-3 text-right tabular-nums">{usd(d.cost)}</td>
+                <td className="hidden max-w-[180px] truncate px-3 text-muted-fg sm:table-cell">{d.models[0] ? modelName(d.models[0].name) : '–'}</td>
+              </tr>
+            ))}
+            {last < days.length && <tr aria-hidden="true" style={{ height: (days.length - last) * ROW_H }}><td colSpan={4} /></tr>}
+            {days.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-subtle-fg">No chat history found yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {days.length > 0 && <div className="mt-1.5 text-[11.5px] text-subtle-fg">{days.length} day{days.length === 1 ? '' : 's'} with usage</div>}
+    </div>
+  );
+}
+
 export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: number }) {
   const { report, error, retry } = useTokens();
   const [range, setRange] = useState<(typeof RANGES)[number]>(30);
@@ -283,7 +332,6 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
     return { ...base, clientShares, clientNames, modelRows, modelOptions: ranked };
   }, [report, range, metric, client, model]);
 
-  const rows = useProgressive(view.table.length, 30, `${range}|${client}|${model}`);
   const scanning = report && (report.scanning || !report.ready);
   const shown = hover != null ? view.list[hover] : null;
   const shownVal = shown ? view.val(shown.d) : null;
@@ -407,37 +455,7 @@ export const DailyUsage = memo(function DailyUsage({ delay = 0 }: { delay?: numb
 
             <div className="mt-6">
               <div className="mb-2 text-[12px] font-medium text-muted-fg">Day by day</div>
-              <div className="rounded-lg border border-line">
-                <table className="w-full text-[12.5px]">
-                  <thead className="sticky top-12 z-10 bg-frame text-left text-[11.5px] text-muted-fg">
-                    <tr>
-                      <th className="px-3 py-1.5 font-medium">Date</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Tokens</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Est. cost</th>
-                      <th className="hidden px-3 py-1.5 font-medium sm:table-cell">Main model</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.table.slice(0, rows.count).map((d) => (
-                      <tr key={d.date} className="day-row border-t border-line/70">
-                        <td className="px-3 py-1.5 tabular-nums">{d.date}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{tok(d.total)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{usd(d.cost)}</td>
-                        <td className="hidden max-w-[180px] truncate px-3 py-1.5 text-muted-fg sm:table-cell">{d.models[0] ? modelName(d.models[0].name) : '–'}</td>
-                      </tr>
-                    ))}
-                    {view.table.length === 0 && (
-                      <tr><td colSpan={4} className="px-3 py-6 text-center text-subtle-fg">No chat history found yet.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-                {rows.more && (
-                  <div ref={rows.sentinel} className="flex items-center justify-between gap-3 border-t border-line/70 px-3 py-2 text-[12px] text-subtle-fg">
-                    <span>Showing {rows.count} of {view.table.length} days. More load as you scroll.</span>
-                    <button onClick={rows.showAll} className="rounded-md px-2 py-1 font-medium text-fg transition-colors hover:bg-frame">Show all</button>
-                  </div>
-                )}
-              </div>
+              <DayTable days={view.table} />
             </div>
 
             <p className="mt-4 text-[11.5px] leading-relaxed text-subtle-fg">

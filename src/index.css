@@ -41,6 +41,7 @@
   --codex: #55554f;
   --grok: #3b6ea8;
   --cursor: #6a5acd;
+  --opencode: #2f7d6d;
   --chart-bar: #e3e3df;
   --chart-grid: #ecece8;
   --shadow: 0 1px 0 rgba(13, 13, 12, 0.04), 0 8px 24px -12px rgba(13, 13, 12, 0.18);
@@ -66,6 +67,7 @@
   --codex: #8a8a82;
   --grok: #6c9bd6;
   --cursor: #9a8cf0;
+  --opencode: #4fb59f;
   --chart-bar: #262623;
   --chart-grid: #222220;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
@@ -74,8 +76,6 @@
 
 html { scroll-padding-top: 64px; scrollbar-gutter: stable; scroll-behavior: smooth; }
 html, body, #root { min-height: 100%; }
-/* Long tables: rows far from the viewport are not laid out until they get close. */
-.day-row { content-visibility: auto; contain-intrinsic-size: auto 34px; }
 body {
   margin: 0;
   background: var(--background);
