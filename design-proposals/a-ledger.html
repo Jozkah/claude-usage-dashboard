@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger: usage dashboard proposal A</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27><rect width=%2716%27 height=%2716%27 rx=%278%27 fill=%27%230d0d0c%27/></svg>">
+<meta name="description" content="Proposal A: a light, ruled ledger where each account is a fuel gauge. Sample data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#f2f2f0; --paper:#ffffff; --ink:#0d0d0c; --ink-2:#55554f; --ink-3:#7a7a72; --line:#e3e3df;
+  --tank:#ecece8; --signal:#ff5a1f; --ok:#0d0d0c; --ease:cubic-bezier(.22,1,.36,1);--d-quick:150ms;--d-fast:250ms;--d-slow:400ms;--d-vslow:500ms;
+  --r:18px; --shadow:0 1px 0 rgba(13,13,12,.04),0 8px 24px -12px rgba(13,13,12,.18);
+}
+@media (prefers-color-scheme:dark){
+  :root{--ground:#121211;--paper:#1b1b19;--ink:#f4f4f1;--ink-2:#b4b4ac;--ink-3:#9a9a91;--line:#2a2a27;--tank:#262623;--ok:#f4f4f1;--shadow:0 1px 0 rgba(255,255,255,.04),0 8px 24px -12px rgba(0,0,0,.6)}
+}
+*{box-sizing:border-box;margin:0}
+html{background:var(--ground);color:var(--ink);font-family:Onest,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+body{min-height:100vh;overflow-x:hidden}
+::selection{background:var(--ink);color:var(--ground)}
+a,button{color:inherit;font:inherit}
+button{cursor:pointer;background:none;border:0}
+:focus-visible{outline:2px solid var(--signal);outline-offset:3px;border-radius:8px}
+.num{font-variant-numeric:tabular-nums}
+
+/* ghost wordmark */
+.ghost{position:absolute;inset:0 0 auto 0;height:300px;display:flex;justify-content:center;align-items:flex-start;pointer-events:none;overflow:hidden;z-index:0}
+.ghost span{font-weight:800;font-size:clamp(120px,24vw,300px);letter-spacing:-.06em;line-height:.9;color:transparent;margin-top:20px;user-select:none;position:relative}
+.ghost span::before{content:attr(data-t);position:absolute;left:0;top:0;color:var(--ink);opacity:.06}
+.wrap{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 20px 96px}
+
+/* sticky pill nav */
+.nav{position:sticky;top:14px;z-index:20;display:flex;justify-content:center;padding-top:150px;margin-bottom:56px}
+.nav-in{display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--paper) 82%,transparent);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:999px;padding:6px;box-shadow:var(--shadow)}
+.logo{width:36px;height:36px;border-radius:50%;background:var(--ink);color:var(--ground);display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:-.04em;margin:0 4px}
+.nav a{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;font-size:13.5px;font-weight:500;color:var(--ink-2);text-decoration:none;transition:background var(--d-quick) var(--ease),color var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.nav a:hover{background:var(--tank);color:var(--ink)}
+.nav a:active{transform:scale(.96)}
+.nav a[aria-current]{color:var(--ink);background:var(--tank)}
+.nav svg{width:15px;height:15px;stroke-width:1.8}
+.nav sup{font-size:10px;color:var(--ink-3);margin-left:2px}
+
+h1{font-size:clamp(30px,5vw,44px);font-weight:700;letter-spacing:-.035em;line-height:1.05;text-wrap:balance;max-width:16ch;margin:0 auto 14px;text-align:center}
+.lede{text-wrap:pretty;text-align:center;color:var(--ink-2);font-size:15px;max-width:44ch;margin:0 auto 28px;line-height:1.5}
+.pills{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:28px}
+.pill{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:500;color:var(--ink-2);transition:color var(--d-quick) var(--ease),background-color var(--d-quick) var(--ease),border-color var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.pill:active,.seg button:active{transform:scale(.96)}
+.pill:hover{color:var(--ink);transform:translateY(-1px)}
+.pill[aria-pressed=true]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+
+/* account list */
+.list{background:var(--paper);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);overflow:hidden}
+.row{display:grid;grid-template-columns:minmax(0,1.5fr) auto auto minmax(0,1fr);gap:20px 28px;align-items:center;padding:20px 24px;border-top:1px solid var(--line);transition:background var(--d-fast) var(--ease);position:relative}
+.row:first-child{border-top:0}
+.row:hover{background:color-mix(in srgb,var(--tank) 45%,transparent)}
+.who{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{width:34px;height:34px;border-radius:50%;background:var(--tank);display:grid;place-items:center;flex:none}
+.mark img{width:18px;height:18px}
+.mark.codex img{border-radius:22%}
+.name{font-weight:600;font-size:16px;letter-spacing:-.015em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--tank);color:var(--ink-2)}
+.chip.next{background:var(--ink);color:var(--ground)}
+.sub{font-size:12.5px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3);display:inline-block;margin-right:6px}
+.dot.live{background:#27c26b}
+.gauge{display:flex;align-items:flex-end;gap:12px}
+.tank-wrap{display:flex;flex-direction:column;align-items:center;gap:6px}
+.tank{width:46px;height:78px;border-radius:14px;background:var(--tank);position:relative;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+.liquid{position:absolute;left:0;right:0;bottom:0;height:0;background:var(--ok);transition:height var(--d-vslow) var(--ease)}
+.liquid.low{background:var(--signal)}
+.liquid::before{content:"";position:absolute;left:0;right:0;top:-6px;height:7px;background:inherit;-webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='46' height='7'><path d='M0 3.5 Q11.5 -1 23 3.5 T46 3.5 V7 H0Z'/></svg>") 0 0/46px 7px repeat-x;mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='46' height='7'><path d='M0 3.5 Q11.5 -1 23 3.5 T46 3.5 V7 H0Z'/></svg>") 0 0/46px 7px repeat-x;animation:slosh 3.2s linear infinite}
+@keyframes slosh{to{-webkit-mask-position:46px 0;mask-position:46px 0}}
+.tank b{position:absolute;inset:0;display:grid;place-items:center;font-size:15px;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.tank.hi b{color:var(--ground)}.tank.hi.lowc b{color:#fff}
+.cap{font-size:11.5px;color:var(--ink-3);font-weight:500}
+.reset{font-size:13px;color:var(--ink-2);text-align:right;line-height:1.45}
+.reset strong{color:var(--ink);font-weight:600}
+.chats{font-size:12.5px;color:var(--ink-2);grid-column:1/-1;display:none}
+.row.open .chats{display:block}
+.chats li{list-style:none;display:flex;gap:8px;align-items:center;padding:4px 0}
+.chats .w{width:6px;height:6px;border-radius:50%;background:#27c26b;flex:none}
+.chats .z{background:var(--ink-3)}
+.more{position:absolute;right:10px;top:10px;padding:6px;border-radius:8px;color:var(--ink-3);opacity:0;transition: var(--d-quick)}
+.row:hover .more,.more:focus-visible{opacity:1}
+.more svg{width:16px;height:16px}
+
+section{margin-top:72px}
+/* 40px minimum hit area without growing the visible control */
+.pill,.seg button,.chip,.pick button,.btn{position:relative}
+.pill::after,.seg button::after,.chip::after,.more::after,.pick button::after{content:"";position:absolute;inset:-6px 0}
+
+h2{font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:6px}
+.hint{text-wrap:pretty;font-size:13.5px;color:var(--ink-3);margin-bottom:20px}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);padding:24px}
+.big{font-size:40px;font-weight:700;letter-spacing:-.04em;line-height:1}
+.big small{font-size:13px;font-weight:500;color:var(--ink-3);letter-spacing:0;margin-left:10px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.seg{display:flex;background:var(--tank);border-radius:999px;padding:3px}
+.seg button{padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--ink-2);transition:color var(--d-quick) var(--ease),background-color var(--d-quick) var(--ease),box-shadow var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.seg button[aria-pressed=true]{background:var(--paper);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:150px}
+.bar{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;border-radius:4px;outline:none}
+.stack{width:100%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;transform-origin:bottom;transition:opacity var(--d-quick)}
+.bars:hover .stack{opacity:.45}.bars .bar:hover .stack,.bars .bar:focus-visible .stack{opacity:1}
+.stack i{display:block;flex-basis:0}
+.axis{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-top:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:16px;font-size:12.5px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.tip{font-size:13px;color:var(--ink-2);min-height:20px;margin-top:10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0;border-top:1px solid var(--line);margin-top:24px}
+.kpi{padding:16px 16px 4px 0}
+.kpi dt{font-size:12px;color:var(--ink-3);font-weight:500}
+.kpi dd{font-size:22px;font-weight:700;letter-spacing:-.03em;margin-top:2px}
+.kpi dd.bad{color:var(--signal)}
+.mix{display:flex;height:8px;border-radius:99px;overflow:hidden;background:var(--tank);margin-top:22px}
+.mixl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 28px;margin-top:12px;font-size:12.5px;color:var(--ink-2)}
+.mixl span{display:flex;justify-content:space-between;gap:8px}.mixl i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:6px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{font-size:12px;font-weight:500;color:var(--ink-3);text-align:right;padding:0 12px 12px}
+td{padding:12px;text-align:right;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left;padding-left:0}
+td:first-child{font-weight:600}.mn{display:flex;align-items:center;gap:8px}
+td i{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+.scroll{overflow-x:auto}
+.note{margin-top:56px;text-align:center;font-size:12.5px;color:var(--ink-3)}
+.reveal{opacity:0;transform:translateY(14px)}
+
+@media (max-width:720px){
+  .row{grid-template-columns:1fr;gap:14px;padding:18px}
+  .who,.gauge,.reset{grid-column:1/-1}
+  .reset{text-align:left;display:flex;gap:6px 18px;flex-wrap:wrap}
+  .reset br{display:none}
+  .gauge{justify-content:flex-start}
+  .more{opacity:1}
+  .nav a span{display:none}
+  .nav-in{gap:2px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .reveal{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+<div class="ghost" aria-hidden="true"><span data-t="LIMITS">LIMITS</span></div>
+<div class="wrap">
+  <nav class="nav" aria-label="Sections">
+    <div class="nav-in">
+      <span class="logo" aria-hidden="true">CU</span>
+      <a href="#accounts" aria-current="true"><i data-lucide="gauge"></i><span>Accounts</span></a>
+      <a href="#usage"><i data-lucide="chart-column"></i><span>Usage</span></a>
+      <a href="#models"><i data-lucide="cpu"></i><span>Models</span></a>
+      <a href="#sync"><i data-lucide="refresh-cw"></i><span>Sync</span></a>
+    </div>
+  </nav>
+
+  <header>
+    <h1 id="headline">Work 2 has the most room.</h1>
+    <p class="lede" id="lede">Five accounts, one glance. Tanks show what is left, not what is used.</p>
+    <div class="pills" role="group" aria-label="Show accounts">
+      <button class="pill" aria-pressed="true" data-f="all">All</button>
+      <button class="pill" aria-pressed="false" data-f="claude">Claude</button>
+      <button class="pill" aria-pressed="false" data-f="codex">Codex</button>
+      <button class="pill" aria-pressed="false" data-f="open">With open chats</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="list" id="accounts" role="list"></div>
+
+    <section id="usage" aria-labelledby="u-h">
+      <h2 id="u-h">Daily usage</h2>
+      <p class="hint">Tokens read from the chat logs on this computer.</p>
+      <div class="panel">
+        <div class="head">
+          <div><div class="big num" id="u-total">0</div><div class="hint" id="u-sub" style="margin:6px 0 0"></div></div>
+          <div class="seg" role="group" aria-label="Range">
+            <button aria-pressed="false" data-r="7">7d</button><button aria-pressed="true" data-r="30">30d</button>
+          </div>
+        </div>
+        <div class="bars" id="bars" role="group" aria-label="Daily tokens by model"></div>
+        <div class="axis"><span id="a0"></span><span id="a1"></span></div>
+        <div class="tip" id="tip" aria-live="polite"></div>
+        <div class="legend" id="legend"></div>
+        <dl class="kpis" id="kpis"></dl>
+        <div class="mix" id="mix" role="img"></div>
+        <div class="mixl" id="mixl"></div>
+      </div>
+    </section>
+
+    <section id="models" aria-labelledby="m-h">
+      <h2 id="m-h">Models</h2>
+      <p class="hint">Prices are public API rates per million tokens. Models without a published price show tokens only.</p>
+      <div class="panel scroll">
+        <table>
+          <thead><tr><th>Model</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Est. cost</th><th>In / out</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sync" aria-labelledby="s-h">
+      <h2 id="s-h">Sync</h2>
+      <p class="hint">Chats, skills and setup are shared across all accounts.</p>
+      <div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+        <div><strong style="font-weight:600">Last sync 4 minutes ago.</strong><div class="hint" style="margin:4px 0 0">Four accounts linked, 413 chats, nothing to copy.</div></div>
+        <button class="pill" style="background:var(--ink);color:var(--ground);border-color:var(--ink)">Sync all now</button>
+      </div>
+    </section>
+  </main>
+  <p class="note">Proposal A. Sample data, not your usage.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script src="shared/data.js"></script>
+<script>
+const D = window.DASH, $ = (s, r = document) => r.querySelector(s);
+const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+const best = D.best();
+$('#headline').textContent = best.name + ' has the most room.';
+
+/* accounts */
+const list = $('#accounts');
+function tank(label, used, reset) {
+  if (used == null) return `<div class="tank-wrap"><div class="tank" style="opacity:.5"><b>–</b></div><span class="cap">${label}</span></div>`;
+  const left = 100 - used;
+  return `<div class="tank-wrap" role="img" aria-label="${label}: ${left}% left"><div class="tank ${left >= 50 ? 'hi' : ''} ${left < 20 ? 'lowc' : ''}"><div class="liquid ${left < 20 ? 'low' : ''}" data-h="${left}"></div><b class="num">${left}</b></div><span class="cap">${label}</span></div>`;
+}
+function renderAccounts(filter = 'all') {
+  list.innerHTML = '';
+  D.accounts.filter((a) => filter === 'all' || filter === a.provider || (filter === 'open' && a.chats.length)).forEach((a) => {
+    const el = document.createElement('article');
+    el.className = 'row'; el.setAttribute('role', 'listitem'); el.tabIndex = 0;
+    el.innerHTML = `
+      <div class="who"><span class="mark ${a.provider}"><img src="../public/icons/${a.provider}.svg" alt=""></span>
+        <div style="min-width:0"><div class="name">${a.name}<span class="chip">${a.plan}</span>${a === best ? '<span class="chip next">Use next</span>' : ''}</div>
+        <div class="sub"><span class="dot ${a.live ? 'live' : ''}"></span>${a.chats.length ? a.chats.length + ' open chat' + (a.chats.length > 1 ? 's' : '') : 'Idle'} · ${a.dir}</div></div></div>
+      <div class="gauge">${tank('5 hour', a.five)}${tank('Weekly', a.week)}</div>
+      <div class="reset">${a.fiveReset ? `5h resets in <strong class="num">${a.fiveReset}</strong><br>` : ''}Weekly in <strong class="num">${a.weekReset}</strong></div>
+      <button class="more" aria-label="Account menu for ${a.name}"><i data-lucide="ellipsis"></i></button>
+      <ul class="chats">${a.chats.map((c) => `<li><span class="w ${c.s === 'working' ? '' : 'z'}"></span>${c.t}</li>`).join('') || '<li style="color:var(--ink-3)">No active chats</li>'}</ul>`;
+    el.addEventListener('click', (e) => { if (!e.target.closest('.more')) el.classList.toggle('open'); });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) el.classList.toggle('open'); });
+    list.appendChild(el);
+  });
+  lucide.createIcons();
+  requestAnimationFrame(() => document.querySelectorAll('.liquid').forEach((l, i) => {
+    const h = l.dataset.h + '%';
+    if (reduce) { l.style.height = h; return; }
+    l.style.transitionDelay = i * 40 + 'ms';
+    requestAnimationFrame(() => (l.style.height = h));
+  }));
+}
+renderAccounts();
+document.querySelectorAll('.pill[data-f]').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.pill[data-f]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  renderAccounts(b.dataset.f);
+}));
+
+/* usage */
+const bars = $('#bars');
+const sum = (a) => a.reduce((n, x) => n + x, 0);
+function renderUsage(range = 30) {
+  const days = D.days.slice(-range), max = Math.max(...days.map(D.dayTotal));
+  bars.innerHTML = '';
+  days.forEach((d) => {
+    const b = document.createElement('div');
+    b.className = 'bar'; b.tabIndex = 0; b.setAttribute('role', 'img');
+    b.setAttribute('aria-label', `${d.date}: ${D.fmt(D.dayTotal(d))} tokens`);
+    const total = D.dayTotal(d);
+    b.innerHTML = `<div class="stack" style="height:${(total / max) * 100}%">${d.parts.map((p, i) => `<i style="flex-grow:${p};background:${D.models[i].color}"></i>`).join('')}</div>`;
+    const show = () => ($('#tip').textContent = `${d.date} · ${D.fmt(total)} tokens · ` + d.parts.map((p, i) => p ? `${D.models[i].name} ${D.fmt(p)}` : '').filter(Boolean).slice(0, 3).join(' · '));
+    b.addEventListener('pointerenter', show); b.addEventListener('focus', show);
+    bars.appendChild(b);
+  });
+  $('#a0').textContent = days[0].date.slice(5); $('#a1').textContent = days[days.length - 1].date.slice(5);
+  const t = sum(days.map(D.dayTotal));
+  $('#u-total').textContent = D.fmt(t); $('#u-sub').textContent = `last ${range} days · avg ${D.fmt(t / days.length)} per day`;
+  if (!reduce && !renderUsage.done) gsap.from('.stack', { scaleY: 0, duration: .5, ease: 'power3.out', stagger: { each: .01, from: 'end' } });
+  renderUsage.done = true; // intro only: toggling the range is frequent and stays instant
+}
+renderUsage();
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b)); renderUsage(+b.dataset.r);
+}));
+$('#legend').innerHTML = D.models.map((m) => `<span><i style="background:${m.color}"></i>${m.name}</span>`).join('');
+const s = D.stats, req = s.requests + s.failed + s.canceled, prompt = s.input + s.cacheRead + s.cacheWrite;
+const pct = (n, d) => ((n / d) * 100).toFixed(1) + '%';
+$('#kpis').innerHTML = [['Requests', D.fmt(req)], ['Success', D.fmt(s.requests)], ['Failed', s.failed, 'bad'], ['Canceled', s.canceled], ['Success rate', pct(s.requests, req)], ['Cache hit rate', pct(s.cacheRead, prompt)], ['Reasoning', D.fmt(s.reasoning)]]
+  .map(([k, v, c]) => `<div class="kpi"><dt>${k}</dt><dd class="num ${c || ''}">${v}</dd></div>`).join('');
+const mix = [['Uncached input', s.input, '#4f7cff'], ['Cache read', s.cacheRead, '#e0a030'], ['Cache write', s.cacheWrite, '#e0587f'], ['Output', s.output, '#3fb68b']], all = sum(mix.map((m) => m[1]));
+$('#mix').setAttribute('aria-label', mix.map((m) => `${m[0]} ${pct(m[1], all)}`).join(', '));
+$('#mix').innerHTML = mix.map((m) => `<i style="flex-grow:${m[1]};flex-basis:0;background:${m[2]}"></i>`).join('');
+$('#mixl').innerHTML = mix.map((m) => `<span><span><i style="background:${m[2]}"></i>${m[0]}</span><span class="num">${D.fmt(m[1])} · ${pct(m[1], all)}</span></span>`).join('');
+$('#rows').innerHTML = D.rows.map((r, i) => `<tr><td><span class="mn"><i style="background:${D.models[i].color}"></i>${r[0]}</span></td>${r.slice(1).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
+
+/* entrances: one orchestrated moment, content visible by default */
+if (!reduce) {
+  gsap.from('h1,.lede,.pills', { y: 12, opacity: 0, duration: .5, ease: 'power3.out', stagger: .06 });
+  gsap.from('.row', { y: 12, opacity: 0, duration: .5, ease: 'power3.out', stagger: .05, delay: .15 });
+}
+/* sticky nav active state */
+const links = [...document.querySelectorAll('.nav a')];
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((l) => (l.getAttribute('href') === '#' + e.target.id ? l.setAttribute('aria-current', 'true') : l.removeAttribute('aria-current'))); }), { rootMargin: '-40% 0px -55% 0px' });
+['accounts', 'usage', 'models', 'sync'].forEach((id) => io.observe(document.getElementById(id)));
+</script>
+</body>
+</html>

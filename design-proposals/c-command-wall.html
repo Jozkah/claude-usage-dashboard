@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command Wall: usage dashboard proposal C</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27><rect width=%2716%27 height=%2716%27 rx=%274%27 fill=%27%23c8f169%27/></svg>">
+<meta name="description" content="Proposal C: a forest-dark bento wall where a particle orb is the headroom. Sample data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#08120e; --tile:#0e1b15; --tile-2:#13241c; --line:#1f3429; --ink:#ecefe6; --ink-2:#a3b0a4; --ink-3:#8a9b8d; --lime:#c8f169; --warn:#ff9d57;
+  --ease:cubic-bezier(.22,1,.36,1);--d-quick:150ms;--d-fast:250ms;--d-slow:400ms;--d-vslow:500ms;
+  --display:Sora,ui-sans-serif,system-ui,sans-serif; --body:Manrope,ui-sans-serif,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+html{background:var(--bg);color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{min-height:100vh;overflow-x:hidden}
+::selection{background:var(--lime);color:var(--bg)}
+button,a{font:inherit;color:inherit}button{background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--lime);outline-offset:3px;border-radius:12px}
+.num{font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
+
+.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:100vh}
+/* dock rail */
+.dock{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 0;border-right:1px solid var(--line)}
+.dock .lg{width:40px;height:40px;border-radius:13px;background:var(--lime);color:var(--bg);display:grid;place-items:center;font-family:var(--display);font-weight:700;margin-bottom:14px}
+.dk{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:var(--ink-2);position:relative;transition:transform var(--d-fast) var(--ease), var(--d-quick), var(--d-quick);transform-origin:left center}
+.dk:hover{background:var(--tile-2);color:var(--ink)}
+.dk[aria-current]{background:var(--tile-2);color:var(--lime)}
+.dk svg{width:20px;height:20px;stroke-width:1.8}
+.dk .tt{position:absolute;left:58px;white-space:nowrap;font-size:12.5px;font-weight:600;background:var(--tile-2);border:1px solid var(--line);padding:6px 10px;border-radius:9px;opacity:0;pointer-events:none;transform:translateX(-4px);transition:opacity var(--d-quick) var(--ease),transform var(--d-quick) var(--ease);z-index:5}
+.dk:hover .tt,.dk:focus-visible .tt{opacity:1;transform:none}
+.sp{flex:1}
+
+main{padding:22px clamp(14px,2.4vw,36px) 64px;min-width:0}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.bar h1{text-wrap:balance;font-family:var(--display);font-weight:600;font-size:20px;letter-spacing:-.03em}
+.bar p{font-size:13px;color:var(--ink-3);margin-top:3px}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:11px;border:1px solid var(--line);background:var(--tile);font-size:13px;font-weight:600;transition:border-color var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.btn:hover{border-color:var(--ink-3);transform:translateY(-1px)}.btn:active{transform:scale(.96)}
+.btn.pri{background:var(--lime);border-color:var(--lime);color:var(--bg)}
+.btn svg{width:15px;height:15px}
+
+.wall{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.tile{background:var(--tile);border:1px solid var(--line);border-radius:20px;padding:18px;position:relative;overflow:hidden;min-width:0;--mx:50%;--my:50%}
+/* spotlight border that follows the cursor */
+.tile::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:conic-gradient(from var(--ang,0deg) at 50% 50%,var(--lime),transparent 22%,transparent 78%,var(--lime));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:opacity var(--d-fast);pointer-events:none}
+.tile:hover::before{opacity:.85}
+.t-h{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+.t-h h2{font-family:var(--display);font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--ink-2);display:flex;gap:8px;align-items:center}
+.t-h svg{width:15px;height:15px;color:var(--ink-3)}
+
+.orb{grid-column:span 5;grid-row:span 2;min-height:440px;display:flex;flex-direction:column;padding:0}
+.orb canvas{position:absolute;inset:0;width:100%;height:100%}
+.orb .ov{position:relative;z-index:1;padding:20px;display:flex;flex-direction:column;height:100%;pointer-events:none}
+.orb .ov > *{pointer-events:auto}
+.orb .pick{display:flex;gap:6px;flex-wrap:wrap}
+.orb .pick button{padding:6px 11px;border-radius:99px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:rgba(8,18,14,.6);backdrop-filter:blur(6px);color:var(--ink-2);transition:color var(--d-quick) var(--ease),background-color var(--d-quick) var(--ease),border-color var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.orb .pick button:active{transform:scale(.96)}
+.orb .pick button:hover{color:var(--ink)}
+.orb .pick button[aria-pressed=true]{background:var(--lime);border-color:var(--lime);color:var(--bg)}
+.orb .read{margin-top:auto}
+.orb .read b{font-family:var(--display);font-weight:700;font-size:clamp(56px,7vw,96px);letter-spacing:-.06em;line-height:.9;display:block}
+.orb .read b small{font-size:.32em;letter-spacing:-.02em;color:var(--ink-2);font-weight:600;margin-left:6px}
+.orb .read p{text-wrap:pretty;margin-top:10px;color:var(--ink-2);font-size:14px;max-width:34ch;line-height:1.5}
+
+.acc{grid-column:span 7;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:0;background:none;border:0;overflow:visible}
+.acc .tile{padding:14px;display:flex;flex-direction:column;gap:12px;cursor:pointer;text-align:left;transition:transform var(--d-fast) var(--ease),border-color .25s}
+.acc .tile:hover{transform:translateY(-3px)}
+.acc .tile[aria-pressed=true]{border-color:var(--lime);background:var(--tile-2)}
+.acc .tile img{width:20px;height:20px}.acc .tile img.codex{border-radius:22%}
+.acc .nm{font-family:var(--display);font-weight:600;font-size:13.5px;letter-spacing:-.02em;line-height:1.2}
+.acc .pl{font-size:11.5px;color:var(--ink-3);margin-top:3px}
+.ringw{position:relative;width:64px;height:64px;margin-top:auto}
+.ringw svg{width:64px;height:64px;transform:rotate(-90deg)}
+.ringw circle{fill:none;stroke-width:6;stroke-linecap:round}
+.ringw .bg{stroke:var(--line)}
+.ringw .fg{stroke:var(--lime);transition:stroke-dashoffset var(--d-vslow) var(--ease)}
+.ringw .fg.low{stroke:var(--warn)}
+.ringw b{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--display);font-size:15px;font-weight:700;letter-spacing:-.03em}
+.acc .rs{font-size:11.5px;color:var(--ink-3)}
+
+.stats{grid-column:span 7;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;padding:0}
+.stat{padding:18px;border-right:1px solid var(--line)}.stat:last-child{border:0}
+.stat dt{font-size:12px;color:var(--ink-3);font-weight:600}
+.stat dd{font-family:var(--display);font-size:24px;font-weight:600;letter-spacing:-.04em;margin-top:6px}
+.stat dd.bad{color:var(--warn)}.stat dd.ok{color:var(--lime)}
+
+.chart{grid-column:span 8}
+.side{grid-column:span 4;align-self:start}
+.models{grid-column:span 12}
+.chats{grid-column:span 12}
+.seg{display:flex;gap:4px;background:var(--bg);border-radius:10px;padding:3px;border:1px solid var(--line)}
+.seg button{padding:7px 12px;border-radius:7px;font-size:12px;font-weight:600;color:var(--ink-3);transition:color var(--d-quick) var(--ease),background-color var(--d-quick) var(--ease),transform var(--d-quick) var(--ease)}
+.seg button:active{transform:scale(.96)}
+.seg button[aria-pressed=true]{background:var(--tile-2);color:var(--ink)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:200px}
+.b{flex:1;height:100%;display:flex;align-items:flex-end;min-width:0;outline:none}
+.st{width:100%;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden;transform-origin:bottom}
+.st i{display:block;flex-basis:0}
+.bars:hover .st{opacity:.4}.bars .b:hover .st,.bars .b:focus-visible .st{opacity:1}
+.big{font-family:var(--display);font-size:30px;font-weight:600;letter-spacing:-.05em}
+.big small{font-size:12.5px;color:var(--ink-3);font-weight:500;letter-spacing:0;margin-left:8px;font-family:var(--body)}
+.tip{font-size:12.5px;color:var(--ink-2);min-height:18px;margin-top:10px}
+.lg2{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12px;color:var(--ink-2)}.lg2 i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:6px}
+.mixbar{display:flex;height:10px;border-radius:99px;overflow:hidden;background:var(--bg);margin:6px 0 16px}
+.ml{display:grid;gap:10px;font-size:13px}.ml p{display:flex;justify-content:space-between;color:var(--ink-2)}.ml i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:8px}.ml b{color:var(--ink);font-weight:600}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
+th{font-size:11.5px;color:var(--ink-3);font-weight:600;text-align:right;padding:0 10px 10px}
+td{padding:11px 10px;text-align:right;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+th:first-child,td:first-child{text-align:left;padding-left:0}
+td:first-child{color:var(--ink);font-weight:600}.mn{display:flex;gap:9px;align-items:center}td i{width:9px;height:9px;border-radius:3px;flex:none}
+.cl{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.cl{padding:0}.cl li{list-style:none;display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;font-size:13px;color:var(--ink-2)}
+.cl li b{display:block;color:var(--ink);font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl .w{width:7px;height:7px;border-radius:50%;background:var(--lime);flex:none}.cl .z{background:var(--ink-3)}
+.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
+
+@media (max-width:1100px){.orb{grid-column:span 12;grid-row:auto;min-height:380px}.acc,.stats,.chart,.side{grid-column:span 12}.acc{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.stats{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+@media (max-width:640px){.shell{grid-template-columns:1fr}.dock{position:fixed;bottom:0;top:auto;left:0;right:0;height:62px;flex-direction:row;justify-content:space-around;padding:8px;border:0;border-top:1px solid var(--line);background:var(--bg);z-index:30}.dock .lg,.sp{display:none}.dk .tt{display:none}main{padding-bottom:90px}}
+/* 40px minimum hit area without growing the visible control */
+.pill,.seg button,.pick button,.btn{position:relative}
+.seg button::after,.pick button::after{content:"";position:absolute;inset:-6px 0}
+/* gsap owns transform during the entrance; a CSS transform transition would lag behind it */
+.intro .tile,.intro .dk{transition:none!important}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="dock" aria-label="Main">
+    <div class="lg" aria-hidden="true">C</div>
+    <a class="dk" href="#top" aria-current="page" aria-label="Overview"><i data-lucide="layout-dashboard"></i><span class="tt">Overview</span></a>
+    <a class="dk" href="#chart" aria-label="Usage"><i data-lucide="chart-column"></i><span class="tt">Usage</span></a>
+    <a class="dk" href="#models" aria-label="Models"><i data-lucide="cpu"></i><span class="tt">Models</span></a>
+    <a class="dk" href="#chats" aria-label="Chats"><i data-lucide="messages-square"></i><span class="tt">Chats</span></a>
+    <div class="sp"></div>
+    <button class="dk" aria-label="Sync all accounts"><i data-lucide="refresh-cw"></i><span class="tt">Sync all</span></button>
+    <button class="dk" aria-label="Settings"><i data-lucide="settings-2"></i><span class="tt">Settings</span></button>
+  </nav>
+
+  <main id="top">
+    <div class="bar">
+      <div><h1>Usage wall</h1><p>Five accounts across Claude and Codex · updated just now</p></div>
+      <div class="acts">
+        <button class="btn"><i data-lucide="terminal"></i>Open Claude Code</button>
+        <button class="btn"><i data-lucide="monitor"></i>Open Desktop</button>
+        <button class="btn pri"><i data-lucide="plus"></i>Add account</button>
+      </div>
+    </div>
+
+    <div class="wall">
+      <section class="tile orb" aria-label="Headroom orb">
+        <canvas id="orb" aria-hidden="true"></canvas>
+        <div class="ov">
+          <div class="pick" id="pick" role="group" aria-label="Choose account"></div>
+          <div class="read" aria-live="polite" id="read"></div>
+        </div>
+      </section>
+
+      <div class="acc" id="acc" role="group" aria-label="Accounts"></div>
+
+      <dl class="tile stats" id="stats"></dl>
+
+      <section class="tile chart" id="chart">
+        <div class="t-h"><h2><i data-lucide="chart-column"></i>Daily usage</h2>
+          <div class="seg" role="group" aria-label="Range"><button aria-pressed="false" data-r="7">7d</button><button aria-pressed="true" data-r="30">30d</button></div></div>
+        <div class="big num" id="tot"></div>
+        <div class="bars" id="bars" role="group" aria-label="Daily tokens by model" style="margin-top:14px"></div>
+        <p class="tip" id="tip" aria-live="polite"></p>
+        <div class="lg2" id="legend"></div>
+      </section>
+
+      <section class="tile side">
+        <div class="t-h"><h2><i data-lucide="layers"></i>Token mix</h2></div>
+        <div class="mixbar" id="mix" role="img"></div>
+        <div class="ml" id="ml"></div>
+        <div class="t-h" style="margin:22px 0 12px"><h2><i data-lucide="cpu"></i>By model</h2></div>
+        <div class="ml" id="share"></div>
+      </section>
+
+      <section class="tile models" id="models">
+        <div class="t-h"><h2><i data-lucide="cpu"></i>Models</h2><span style="font-size:12px;color:var(--ink-3)">USD per million tokens, public API rates</span></div>
+        <div class="scroll"><table><thead><tr><th>Model</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Est. cost</th><th>In / out</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>
+
+      <section class="tile chats" id="chats">
+        <div class="t-h"><h2><i data-lucide="messages-square"></i>Open chats</h2></div>
+        <ul class="cl" id="cl"></ul>
+      </section>
+    </div>
+    <p class="foot">Proposal C. Sample data, not your usage.</p>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script src="shared/data.js"></script>
+<script>
+const D = window.DASH, $ = (s) => document.querySelector(s), sum = (a) => a.reduce((n, x) => n + x, 0);
+const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+let cur = D.best();
+
+/* ---------- orb: N dots, `left`% of them lit. Drag-free, pointer repels. ---------- */
+const cv = $('#orb'), ctx = cv.getContext('2d');
+const N = 900, pts = [];
+for (let i = 0; i < N; i++) { // fibonacci sphere
+  const y = 1 - (i / (N - 1)) * 2, r = Math.sqrt(1 - y * y), th = i * 2.399963;
+  pts.push({ x: Math.cos(th) * r, y, z: Math.sin(th) * r, rank: i / N });
+}
+let W = 0, H = 0, dpr = 1, rot = 0, litTarget = D.left(cur) / 100, lit = 0, mx = -1, my = -1;
+function size() { const b = cv.getBoundingClientRect(); dpr = Math.min(devicePixelRatio || 1, 2); W = b.width; H = b.height; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+new ResizeObserver(size).observe(cv); size();
+cv.parentElement.addEventListener('pointermove', (e) => { const b = cv.getBoundingClientRect(); mx = e.clientX - b.left; my = e.clientY - b.top; });
+cv.parentElement.addEventListener('pointerleave', () => { mx = my = -1; });
+function frame() {
+  ctx.clearRect(0, 0, W, H);
+  const R = Math.min(W * .4, H * .3), cx = W * .6, cy = H * .33;
+  rot += reduce ? 0 : .0042; lit += (litTarget - lit) * .06;
+  const c = Math.cos(rot), s = Math.sin(rot), list = [];
+  for (const p of pts) { const x = p.x * c - p.z * s, z = p.x * s + p.z * c; list.push({ x, y: p.y, z, rank: p.rank }); }
+  list.sort((a, b) => a.z - b.z);
+  for (const q of list) {
+    const persp = 1 / (1.9 - q.z * .55);
+    let sx = cx + q.x * R * persp * 1.9, sy = cy + q.y * R * persp * 1.9;
+    if (mx >= 0) { const dx = sx - mx, dy = sy - my, d = Math.hypot(dx, dy); if (d < 90) { const f = (1 - d / 90) * 14; sx += (dx / d) * f; sy += (dy / d) * f; } }
+    const on = q.rank < lit, depth = (q.z + 1) / 2;
+    ctx.globalAlpha = on ? .35 + depth * .65 : .07 + depth * .12;
+    ctx.fillStyle = on ? (litTarget < .2 ? '#ff9d57' : '#c8f169') : '#6c7d6f';
+    ctx.beginPath(); ctx.arc(sx, sy, (on ? 1.6 : 1.2) + depth * 1.3, 0, 6.283); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  raf = requestAnimationFrame(frame);
+}
+let raf = requestAnimationFrame(frame);
+document.addEventListener('visibilitychange', () => { cancelAnimationFrame(raf); if (!document.hidden) raf = requestAnimationFrame(frame); });
+
+/* ---------- accounts ---------- */
+function pick(a) {
+  cur = a; litTarget = D.left(a) / 100;
+  const limiting = (a.five ?? -1) > a.week ? '5-hour' : 'weekly', reset = limiting === 'weekly' ? a.weekReset : a.fiveReset;
+  $('#read').innerHTML = `<b class="num">${D.left(a)}<small>% left</small></b><p><strong style="color:var(--ink)">${a.name}</strong> · ${a.plan}. Its ${limiting} limit decides this and resets in ${reset}.${a === D.best() ? ' Best account to use next.' : ''}</p>`;
+  document.querySelectorAll('#pick button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.id === a.id));
+  document.querySelectorAll('#acc .tile').forEach((t) => t.setAttribute('aria-pressed', t.dataset.id === a.id));
+}
+$('#pick').innerHTML = D.accounts.map((a) => `<button data-id="${a.id}" aria-pressed="false">${a.name}</button>`).join('');
+const C = 2 * Math.PI * 26;
+$('#acc').innerHTML = D.accounts.map((a) => {
+  const left = D.left(a);
+  return `<button class="tile" data-id="${a.id}" aria-pressed="false"><img class="${a.provider}" src="../public/icons/${a.provider}.svg" alt=""><div><div class="nm">${a.name}</div><div class="pl">${a.plan} · ${a.chats.length ? a.chats.length + ' open' : 'idle'}</div></div>
+    <div class="ringw" role="img" aria-label="${left}% left"><svg viewBox="0 0 64 64"><circle class="bg" cx="32" cy="32" r="26"/><circle class="fg ${left < 20 ? 'low' : ''}" cx="32" cy="32" r="26" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-o="${C * (1 - left / 100)}"/></svg><b class="num">${left}</b></div>
+    <div class="rs">resets ${a.weekReset}</div></button>`;
+}).join('');
+document.querySelectorAll('#pick button,#acc .tile').forEach((el) => el.addEventListener('click', () => pick(D.accounts.find((a) => a.id === el.dataset.id))));
+pick(cur);
+requestAnimationFrame(() => document.querySelectorAll('.fg').forEach((f) => (f.style.strokeDashoffset = f.dataset.o)));
+
+/* ---------- stats ---------- */
+const s = D.stats, req = s.requests + s.failed + s.canceled, prompt = s.input + s.cacheRead + s.cacheWrite, pct = (n, d) => ((n / d) * 100).toFixed(1) + '%';
+$('#stats').innerHTML = [['Requests', D.fmt(req), ''], ['Success rate', pct(s.requests, req), 'ok'], ['Failed / canceled', s.failed + ' / ' + s.canceled, s.failed ? 'bad' : ''], ['Cache hit rate', pct(s.cacheRead, prompt), 'ok']].map(([k, v, c]) => `<div class="stat"><dt>${k}</dt><dd class="num ${c}">${v}</dd></div>`).join('');
+
+/* ---------- chart ---------- */
+function render(range = 30) {
+  const days = D.days.slice(-range), max = Math.max(...days.map(D.dayTotal)), bars = $('#bars'); bars.innerHTML = '';
+  days.forEach((d) => {
+    const t = D.dayTotal(d), b = document.createElement('div');
+    b.className = 'b'; b.tabIndex = 0; b.setAttribute('role', 'img'); b.setAttribute('aria-label', `${d.date}: ${D.fmt(t)} tokens`);
+    b.innerHTML = `<div class="st" style="height:${(t / max) * 100}%">${d.parts.map((p, i) => `<i style="flex-grow:${p};background:${D.models[i].color}"></i>`).join('')}</div>`;
+    const show = () => ($('#tip').textContent = `${d.date} · ${D.fmt(t)} tokens`);
+    b.addEventListener('pointerenter', show); b.addEventListener('focus', show); bars.appendChild(b);
+  });
+  const t = sum(days.map(D.dayTotal)); $('#tot').innerHTML = `${D.fmt(t)}<small>tokens · ${range} days</small>`;
+  if (!reduce && !render.done) gsap.from('.st', { scaleY: 0, duration: .5, ease: 'power3.out', stagger: { each: .008, from: 'start' } });
+  render.done = true;
+}
+render();
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => { document.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b)); render(+b.dataset.r); }));
+$('#legend').innerHTML = D.models.map((m) => `<span><i style="background:${m.color}"></i>${m.name}</span>`).join('');
+const mix = [['Uncached input', s.input, '#4f7cff'], ['Cache read', s.cacheRead, '#e0a030'], ['Cache write', s.cacheWrite, '#e0587f'], ['Output', s.output, '#3fb68b']], all = sum(mix.map((m) => m[1]));
+$('#mix').setAttribute('aria-label', mix.map((m) => `${m[0]} ${pct(m[1], all)}`).join(', '));
+$('#mix').innerHTML = mix.map((m) => `<i style="flex-grow:${m[1]};flex-basis:0;background:${m[2]}"></i>`).join('');
+$('#ml').innerHTML = mix.map((m) => `<p><span><i style="background:${m[2]}"></i>${m[0]}</span><b class="num">${D.fmt(m[1])} · ${pct(m[1], all)}</b></p>`).join('');
+$('#rows').innerHTML = D.rows.map((r, i) => `<tr><td><span class="mn"><i style="background:${D.models[i].color}"></i>${r[0]}</span></td>${r.slice(1).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
+const mt = D.rows.map((r, i) => [D.models[i], D.days.reduce((n, d) => n + d.parts[i], 0)]), mtot = sum(mt.map((x) => x[1]));
+$('#share').innerHTML = mt.map(([m, v]) => `<p style="display:grid;grid-template-columns:1fr auto;gap:4px 10px"><span><i style="background:${m.color}"></i>${m.name}</span><b class="num">${pct(v, mtot)}</b><span style="grid-column:1/-1;height:4px;border-radius:9px;background:var(--bg);overflow:hidden;display:block"><span style="display:block;height:100%;width:${(v / mtot) * 100}%;background:${m.color}"></span></span></p>`).join('');
+$('#cl').innerHTML = D.accounts.flatMap((a) => a.chats.map((c) => `<li><span class="w ${c.s === 'working' ? '' : 'z'}"></span><div style="min-width:0"><b>${c.t}</b>${a.name} · ${c.s}</div></li>`)).join('');
+
+/* ---------- spotlight, dock magnification, entrance ---------- */
+document.querySelectorAll('.tile').forEach((t) => t.addEventListener('pointermove', (e) => { const b = t.getBoundingClientRect(); t.style.setProperty('--ang', Math.atan2(e.clientY - (b.top + b.height / 2), e.clientX - (b.left + b.width / 2)) * 180 / Math.PI + 90 + 'deg'); }));
+if (!reduce && matchMedia('(pointer:fine)').matches && innerWidth > 640) {
+  const dks = [...document.querySelectorAll('.dk')], dock = $('.dock');
+  dock.addEventListener('pointermove', (e) => dks.forEach((k) => { const b = k.getBoundingClientRect(), d = Math.abs(e.clientY - (b.top + b.height / 2)); gsap.to(k, { scale: 1 + Math.max(0, 1 - d / 90) * .28, duration: .15, ease: 'power3.out', overwrite: true }); }));
+  dock.addEventListener('pointerleave', () => gsap.to(dks, { scale: 1, duration: .25, ease: 'power3.out' }));
+}
+if (!reduce) {
+  document.body.classList.add('intro');
+  const done = () => document.body.classList.remove('intro');
+  gsap.from('.tile', { y: 12, opacity: 0, duration: .5, ease: 'power3.out', stagger: .03, clearProps: 'transform,opacity', onComplete: done });
+  gsap.from('.dock > *', { x: -8, opacity: 0, duration: .4, ease: 'power3.out', stagger: .03, clearProps: 'transform,opacity' });
+}
+lucide.createIcons();
+</script>
+</body>
+</html>
