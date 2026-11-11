@@ -199,7 +199,7 @@ export default function App() {
 
       <main className="relative z-10 mx-auto w-full max-w-[1040px] px-4 pt-8 pb-24 sm:px-5">
         <header className="animate-rise">
-          <h1 className="text-[26px] leading-tight font-bold tracking-[-0.03em]">{headline}</h1>
+          <h1 className="text-[32px] leading-tight font-semibold tracking-[-0.04em] text-balance">{headline}</h1>
           <p className="mt-1.5 max-w-[60ch] text-[14px] leading-relaxed text-muted-fg text-pretty">{hint}</p>
         </header>
 
@@ -241,13 +241,13 @@ export default function App() {
           {data && (
             <>
               <section id="limits" className="scroll-mt-16">
-                <h2 className="mb-3 px-1 text-[18px] font-bold tracking-[-0.02em]">Limits</h2>
+                <h2 className="mb-3 px-1 text-[18px] font-semibold tracking-[-0.02em] text-balance">Limits</h2>
                 <PooledLimits accounts={accounts} now={now} onPick={pick} />
               </section>
 
               <section id="accounts" className="mt-8 scroll-mt-16">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
-                  <h2 className="text-[18px] font-bold tracking-[-0.02em]">Accounts</h2>
+                  <h2 className="text-[18px] font-semibold tracking-[-0.02em] text-balance">Accounts</h2>
                   <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
                     {accounts.length > 1 && (
                       <div role="group" aria-label="Show accounts" className="flex max-w-full min-w-0 overflow-x-auto rounded-lg border border-line bg-frame p-0.5 text-[12.5px]">
@@ -280,7 +280,7 @@ export default function App() {
               </section>
 
               <section id="resets" className="mt-10 scroll-mt-16">
-                <h2 className="mb-1 px-1 text-[18px] font-bold tracking-[-0.02em]">Resets and trend</h2>
+                <h2 className="mb-1 px-1 text-[18px] font-semibold tracking-[-0.02em] text-balance">Resets and trend</h2>
                 <p className="mb-4 px-1 text-[13.5px] text-subtle-fg">When each window refills, how fast you are spending it, and the limits behind every account.</p>
                 <LazySection minHeight={820}>
                 <div className="flex flex-col gap-4">

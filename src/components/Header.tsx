@@ -17,7 +17,7 @@ const SECTIONS = [
   { id: 'usage', label: 'Usage' },
 ] as const;
 
-const iconBtn = 'grid size-8 place-items-center rounded-lg text-muted-fg transition-[color,background-color,transform] duration-150 hover:bg-frame hover:text-fg active:scale-[0.96]';
+const iconBtn = 'relative grid size-8 place-items-center rounded-lg before:absolute before:-inset-1 before:content-[""] text-muted-fg transition-[color,background-color,transform] duration-150 hover:bg-frame hover:text-fg active:scale-[0.96]';
 
 /** A plain sticky bar: name and section links on the left, small tools on the right. */
 export function Header({ dark, loading, onToggleTheme, onRefresh, notify, effects }: Props) {

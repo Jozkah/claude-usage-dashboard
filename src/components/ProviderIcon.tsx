@@ -17,7 +17,7 @@ export function ProviderIcon({ provider, className = 'size-4', title = true }: {
       width={24}
       height={24}
       draggable={false}
-      className={`${className} shrink-0 ${provider === 'claude' ? '' : 'rounded-[22%]'}`}
+      className={`${className} shrink-0 ${provider === 'claude' ? '' : 'rounded-[22%] outline outline-1 -outline-offset-1 outline-white/10'}`}
     />
   );
 }
