@@ -9,18 +9,21 @@ import { useNow } from '../lib/api';
 
 const SHORT: Record<string, string> = { five_hour: '5 hour', seven_day: 'Weekly' };
 const label = (w: UsageWindow) => SHORT[w.key] ?? w.label.replace(/ · all models$/i, '');
-const CELLS = 10;
+const R = 22, C = 2 * Math.PI * R;
 
-/** Ten squares: each is a tenth of the limit that is still left. */
-function Squares({ w, dim }: { w: UsageWindow; dim: boolean }) {
-  const left = Math.max(0, 100 - w.used);
-  const filled = Math.round((left / 100) * CELLS);
-  const color = colorVar(levelFor(w.used));
+/** A thin ring that shows how much of the limit is left. */
+function Ring({ w, dim }: { w: UsageWindow; dim: boolean }) {
+  const left = Math.max(0, Math.min(100, 100 - w.used));
   return (
-    <div className={`grid grid-cols-10 gap-[3px] ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${Math.round(left)}% left`}>
-      {Array.from({ length: CELLS }, (_, i) => (
-        <span key={i} className="aspect-square rounded-[3px]" style={{ background: i < filled ? color : 'var(--frame)' }} />
-      ))}
+    <div className={`flex flex-col items-center gap-1.5 ${dim ? 'opacity-50' : ''}`} role="img" aria-label={`${label(w)}: ${Math.round(left)}% left`}>
+      <div className="relative size-[60px]">
+        <svg viewBox="0 0 52 52" className="size-full -rotate-90">
+          <circle cx="26" cy="26" r={R} fill="none" stroke="var(--frame)" strokeWidth="4" />
+          <circle cx="26" cy="26" r={R} fill="none" stroke={colorVar(levelFor(w.used))} strokeWidth="4" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - left / 100)} style={{ transition: 'stroke-dashoffset 0.5s var(--ease-out-expo)' }} />
+        </svg>
+        <span className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums">{Math.round(left)}</span>
+      </div>
+      <span className="text-[11.5px] text-subtle-fg">{label(w)}</span>
     </div>
   );
 }
@@ -42,7 +45,6 @@ interface Props {
 export function AccountTile({ account: a, now, onOpen, onContextMenu }: Props) {
   const ws = mainWindows(a).filter((w) => !w.expired);
   const tight = ws.length ? ws.reduce((m, w) => (w.used > m.used ? w : m)) : null;
-  const left = tight ? Math.round(100 - tight.used) : null;
   const reset = tight ? accountReset(a, tight, now) : null;
   const dim = !!a.stale;
   const provider = providerOf(a);
@@ -63,20 +65,8 @@ export function AccountTile({ account: a, now, onOpen, onContextMenu }: Props) {
         </button>
       </div>
 
-      <div className="flex items-baseline gap-1.5">
-        <span className={`text-[34px] leading-none font-semibold tracking-[-0.04em] tabular-nums ${dim ? 'opacity-50' : ''}`} style={{ color: tight ? colorVar(levelFor(tight.used)) : 'var(--subtle-fg)' }}>
-          {left == null ? '–' : `${left}%`}
-        </span>
-        <span className="text-[12px] text-subtle-fg">{tight ? `left · ${label(tight).toLowerCase()}` : a.status === 'ok' ? 'no reading' : 'no login'}</span>
-      </div>
-
-      <div className="flex flex-col gap-2.5">
-        {ws.slice(0, 2).map((w) => (
-          <div key={w.key}>
-            <div className="mb-1 flex justify-between text-[11.5px] text-subtle-fg"><span>{label(w)}</span><span className="tabular-nums">{Math.round(100 - w.used)}%</span></div>
-            <Squares w={w} dim={dim} />
-          </div>
-        ))}
+      <div className="flex items-start justify-around py-1">
+        {ws.length ? ws.slice(0, 2).map((w) => <Ring key={w.key} w={w} dim={dim} />) : <span className="py-5 text-[12px] text-subtle-fg">{a.status === 'ok' ? 'no reading' : 'no login'}</span>}
       </div>
 
       <div className="mt-auto truncate text-[11.5px] text-subtle-fg">
