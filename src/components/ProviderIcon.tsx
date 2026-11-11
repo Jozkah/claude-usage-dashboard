@@ -1,10 +1,10 @@
 import type { Account } from '../lib/types';
 
-export type Provider = 'claude' | 'codex' | 'grok';
+export type Provider = 'claude' | 'codex' | 'grok' | 'cursor';
 
-export const providerOf = (a: Pick<Account, 'provider'>): Provider => (a.provider === 'codex' ? 'codex' : a.provider === 'grok' ? 'grok' : 'claude');
+export const providerOf = (a: Pick<Account, 'provider'>): Provider => (a.provider === 'codex' ? 'codex' : a.provider === 'grok' ? 'grok' : a.provider === 'cursor' ? 'cursor' : 'claude');
 
-const NAMES: Record<Provider, string> = { claude: 'Claude Code account', codex: 'Codex (ChatGPT) account', grok: 'Grok Build account' };
+const NAMES: Record<Provider, string> = { claude: 'Claude Code account', codex: 'Codex (ChatGPT) account', grok: 'Grok Build account', cursor: 'Cursor account' };
 
 /** Service marks (LobeHub icon set, MIT; the marks belong to Anthropic and OpenAI) served from /icons. */
 export function ProviderIcon({ provider, className = 'size-4', title = true }: { provider: Provider; className?: string; title?: boolean }) {

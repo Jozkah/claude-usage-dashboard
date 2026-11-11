@@ -79,7 +79,8 @@ export default function App() {
 
   const menuActions = (target: Account): MenuAction[] => {
     if (target.provider) {
-      const product = target.provider === 'grok' ? 'Grok' : 'Codex';
+      const product = target.provider === 'grok' ? 'Grok' : target.provider === 'cursor' ? 'Cursor' : 'Codex';
+      if (target.provider === 'cursor') return [];
       return [{ label: `Open ${product} as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name, product), `Could not open ${product}.`) }];
     }
     const claude = accounts.filter((a) => !a.provider);

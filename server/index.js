@@ -33,6 +33,7 @@ import { syncCodeSetup } from './code-setup-sync.js';
 import { syncAllAccounts } from './account-sync.js';
 import { fetchCodexStatus } from './codex.js';
 import { fetchGrokStatus } from './grok.js';
+import { fetchCursorStatus } from './cursor.js';
 import { CLI_PROVIDERS, isCliProvider, isClaudeAccount } from './cli-providers.js';
 import { createCodexSessionReader } from './codex-sessions.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
@@ -286,6 +287,11 @@ async function safeSessions(acc, paused = new Map()) {
 }
 
 async function fetchStatus(acc) {
+  if (acc.provider === 'cursor') {
+    const status = await fetchCursorStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
+      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
+    return { ...status, configDir: acc.configDir };
+  }
   if (acc.provider === 'grok') {
     const status = await fetchGrokStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
       { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
@@ -716,8 +722,9 @@ async function handler(req, res) {
       loginStartedAt.set(id, Date.now());
       try {
         const cliProv = isCliProvider(account.provider) ? CLI_PROVIDERS[account.provider] : null;
+        if (cliProv && !cliProv.login) { loginStartedAt.delete(id); return sendJson(res, 400, { error: `${cliProv.label} has no sign-in window. Set its API key in the dashboard server's environment instead.` }); }
         const child = spawn('cmd.exe', ['/k', cliProv ? cliProv.login : 'claude auth login'], {
-          env: { ...process.env, ...(cliProv ? { [cliProv.env]: configDir } : { CLAUDE_CONFIG_DIR: configDir }) },
+          env: { ...process.env, ...(cliProv?.env ? { [cliProv.env]: configDir } : cliProv ? {} : { CLAUDE_CONFIG_DIR: configDir }) },
           detached: true, stdio: 'ignore', windowsHide: false,
         });
         await new Promise((resolve, reject) => {
@@ -829,8 +836,9 @@ async function handler(req, res) {
       const key = `${id}:${body.kind}`;
       if (Date.now() - (openStartedAt.get(key) || 0) < 5000) return sendJson(res, 409, { error: 'Claude was just opened for this account.' });
       const cliProv = isCliProvider(account.provider) ? CLI_PROVIDERS[account.provider] : null;
+      if (cliProv && !cliProv.command) return sendJson(res, 400, { error: `${cliProv.label} cannot be opened from here.` });
       if (cliProv && body.kind === 'desktop') return sendJson(res, 400, { error: `${cliProv.label} has no separate Desktop profile here. Use Open ${cliProv.label}.` });
-      const env = { ...process.env, ...(cliProv ? { [cliProv.env]: configDir } : { CLAUDE_CONFIG_DIR: configDir }) };
+      const env = { ...process.env, ...(cliProv?.env ? { [cliProv.env]: configDir } : cliProv ? {} : { CLAUDE_CONFIG_DIR: configDir }) };
       /** @type {[string, string[], import('node:child_process').SpawnOptions]} */
       let launch;
       if (body.kind === 'code') {

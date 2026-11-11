@@ -5,6 +5,8 @@
 export const CLI_PROVIDERS = {
   codex: { label: 'Codex', command: 'codex', login: 'codex login', env: 'CODEX_HOME', folder: /^\.codex[\w-]*$/, example: '~/.codex-work' },
   grok: { label: 'Grok Build', command: 'grok', login: 'grok login', env: 'GROK_HOME', folder: /^\.grok[\w-]*$/, example: '~/.grok-work' },
+  // Cursor keeps no readable login: it is read with an API key from the server's environment (see cursor.js).
+  cursor: { label: 'Cursor', command: null, login: null, env: null, folder: /^\.cursor[\w-]*$/, example: '~/.cursor-work' },
 };
 
 export const isCliProvider = (provider) => typeof provider === 'string' && Object.hasOwn(CLI_PROVIDERS, provider);

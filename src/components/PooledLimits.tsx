@@ -5,8 +5,8 @@ import { fmtDur } from '../lib/format';
 import { initials, poolLimits, type PoolRow, type Segment } from '../lib/pool';
 import { ProviderIcon, providerOf, type Provider } from './ProviderIcon';
 
-const LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok Build' };
-const COLOR: Record<string, string> = { claude: 'var(--claude)', codex: 'var(--codex)', grok: 'var(--grok)' };
+const LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok Build', cursor: 'Cursor' };
+const COLOR: Record<string, string> = { claude: 'var(--claude)', codex: 'var(--codex)', grok: 'var(--grok)', cursor: 'var(--cursor)' };
 const TONE: Record<string, string> = { bad: 'text-bad', good: 'text-good', mute: 'text-muted-fg' };
 const hatch = 'repeating-linear-gradient(135deg, color-mix(in srgb, var(--fg) 22%, transparent) 0 1px, transparent 1px 5px)';
 

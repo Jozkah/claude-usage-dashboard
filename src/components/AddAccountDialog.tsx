@@ -9,11 +9,12 @@ interface Props {
   onAdded: () => void;
 }
 
-type Service = 'claude' | 'codex' | 'grok';
+type Service = 'claude' | 'codex' | 'grok' | 'cursor';
 const SERVICES: Record<Service, { label: string; product: string; folder: string; dir: string; env: string; login: string }> = {
   claude: { label: 'Claude Code', product: 'Claude Code', folder: 'Claude config folder', dir: '', env: 'CLAUDE_CONFIG_DIR', login: 'claude auth login' },
   codex: { label: 'Codex (ChatGPT plan)', product: 'Codex', folder: 'Codex folder', dir: '~/.codex', env: 'CODEX_HOME', login: 'codex login' },
   grok: { label: 'Grok Build', product: 'Grok', folder: 'Grok folder', dir: '~/.grok', env: 'GROK_HOME', login: 'grok login' },
+  cursor: { label: 'Cursor', product: 'Cursor', folder: 'Cursor folder', dir: '~/.cursor', env: 'CURSOR_API_KEY', login: '' },
 };
 
 const inputCls =
@@ -74,7 +75,11 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
             <>The folder that account logs into (its <code className="rounded bg-frame px-1">CLAUDE_CONFIG_DIR</code>).
               Log in there once with Claude Code first. Running in Docker? Mount the folder under <code className="rounded bg-frame px-1">/accounts</code> instead.</>
           ) : (
-            <>The folder {SERVICES[service].product} stores its login in (<code className="rounded bg-frame px-1">{SERVICES[service].env}</code>, usually <code className="rounded bg-frame px-1">{SERVICES[service].dir}</code>). Sign in once with <code className="rounded bg-frame px-1">{SERVICES[service].login}</code> first.</>
+            service === 'cursor' ? (
+              <>Cursor keeps no login file here. Any folder works as a label (usually <code className="rounded bg-frame px-1">~/.cursor</code>); the plan is read with a Cursor API key. Start the dashboard server with <code className="rounded bg-frame px-1">CURSOR_API_KEY</code> set, or <code className="rounded bg-frame px-1">CURSOR_API_KEY_&lt;ACCOUNT_ID&gt;</code> for each extra account.</>
+            ) : (
+              <>The folder {SERVICES[service].product} stores its login in (<code className="rounded bg-frame px-1">{SERVICES[service].env}</code>, usually <code className="rounded bg-frame px-1">{SERVICES[service].dir}</code>). Sign in once with <code className="rounded bg-frame px-1">{SERVICES[service].login}</code> first.</>
+            )
           )}
         </p>
 

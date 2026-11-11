@@ -26,7 +26,7 @@ export interface Account {
   name: string;
   configDir: string;
   /** Absent for Claude Code accounts. */
-  provider?: 'codex' | 'grok';
+  provider?: 'codex' | 'grok' | 'cursor';
   fetchedAt: number;
   plan?: string | null;
   seatTier?: 'standard' | 'premium' | null;
