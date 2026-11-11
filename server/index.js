@@ -32,6 +32,8 @@ import { parseDesktopProcessState } from './desktop-process-state.js';
 import { syncCodeSetup } from './code-setup-sync.js';
 import { syncAllAccounts } from './account-sync.js';
 import { fetchCodexStatus } from './codex.js';
+import { fetchGrokStatus } from './grok.js';
+import { CLI_PROVIDERS, isCliProvider, isClaudeAccount } from './cli-providers.js';
 import { createCodexSessionReader } from './codex-sessions.js';
 import { HttpError, sendJson, parseJsonBody, decodeId, resolveStaticPath, streamFile, writeFileAtomic, createInflight,
   parseAllowedHosts, hostAllowed, guardMutation, SECURITY_HEADERS } from './http-utils.js';
@@ -213,8 +215,8 @@ function warnOnce(key, message) {
   console.warn(message);
 }
 
-/** Codex accounts only report usage; chats, skills and plugins belong to Claude Code accounts. */
-function claudeAccounts() { return loadAccounts().filter((a) => a.provider !== 'codex'); }
+/** Codex and Grok accounts only report usage; chats, skills and plugins belong to Claude Code accounts. */
+function claudeAccounts() { return loadAccounts().filter(isClaudeAccount); }
 
 function saveAccounts(accounts) {
   if (MOCK) { mockAccounts = accounts; return; }
@@ -279,10 +281,16 @@ const readCodexSessions = createCodexSessionReader();
 
 async function safeSessions(acc, paused = new Map()) {
   if (acc.provider === 'codex') { try { return await readCodexSessions(expandHome(acc.configDir)); } catch { return []; } }
+  if (isCliProvider(acc.provider)) return [];
   try { return await readSessions(expandHome(acc.configDir), paused); } catch { return []; }
 }
 
 async function fetchStatus(acc) {
+  if (acc.provider === 'grok') {
+    const status = await fetchGrokStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
+      { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }) });
+    return { ...status, configDir: acc.configDir };
+  }
   if (acc.provider === 'codex') {
     const status = await fetchCodexStatus({ id: acc.id, name: acc.name, configDir: expandHome(acc.configDir) },
       { onRateLimit: (wait) => backoff.set(acc.id, { until: Date.now() + wait, wait }), refresh: NO_REFRESH ? null : undefined });
@@ -655,11 +663,12 @@ async function handler(req, res) {
       if (!name || !rawDir) return sendJson(res, 400, { error: 'Name and config folder are required.' });
       const accounts = [...loadAccounts()];
       let configDir = rawDir;
-      if (!MOCK && body.provider === 'codex' && body.create === true) {
-        // A second Codex login needs its own CODEX_HOME. Create it, but only directly inside the user's home folder.
+      const cli = isCliProvider(body.provider) ? CLI_PROVIDERS[body.provider] : null;
+      if (!MOCK && cli && body.create === true) {
+        // A second login needs its own folder. Create it, but only directly inside the user's home folder.
         const target = path.resolve(expandHome(rawDir));
-        if (path.dirname(target) !== path.resolve(os.homedir()) || !/^\.codex[\w-]*$/.test(path.basename(target))) {
-          return sendJson(res, 400, { error: 'A new Codex folder must be named like ~/.codex-work, directly in your home folder.' });
+        if (path.dirname(target) !== path.resolve(os.homedir()) || !cli.folder.test(path.basename(target))) {
+          return sendJson(res, 400, { error: `A new ${cli.label} folder must be named like ${cli.example}, directly in your home folder.` });
         }
         fs.mkdirSync(target, { recursive: true });
       }
@@ -670,7 +679,7 @@ async function handler(req, res) {
       }
       let id = slug(name);
       while (accounts.some((a) => a.id === id)) id = slug(name) + '-' + crypto.randomBytes(2).toString('hex');
-      accounts.push({ id, name, configDir, ...(body.provider === 'codex' ? { provider: 'codex' } : {}) });
+      accounts.push({ id, name, configDir, ...(cli ? { provider: body.provider } : {}) });
       saveAccounts(accounts);
       return sendJson(res, 200, { ok: true });
     }
@@ -679,7 +688,7 @@ async function handler(req, res) {
       if (blocked(req, res)) return;
       const id = decodeId(url.pathname.split('/')[3]);
       const accounts = loadAccounts();
-      const account = accounts.find((candidate) => candidate.id === id && candidate.provider !== 'codex');
+      const account = accounts.find((candidate) => candidate.id === id && isClaudeAccount(candidate));
       if (!account) return sendJson(res, 404, { error: 'Claude account not found.' });
       const { seatTier } = await parseJsonBody(req);
       if (seatTier !== null && seatTier !== 'standard' && seatTier !== 'premium') {
@@ -706,9 +715,9 @@ async function handler(req, res) {
       }
       loginStartedAt.set(id, Date.now());
       try {
-        const codex = account.provider === 'codex';
-        const child = spawn('cmd.exe', ['/k', codex ? 'codex login' : 'claude auth login'], {
-          env: { ...process.env, ...(codex ? { CODEX_HOME: configDir } : { CLAUDE_CONFIG_DIR: configDir }) },
+        const cliProv = isCliProvider(account.provider) ? CLI_PROVIDERS[account.provider] : null;
+        const child = spawn('cmd.exe', ['/k', cliProv ? cliProv.login : 'claude auth login'], {
+          env: { ...process.env, ...(cliProv ? { [cliProv.env]: configDir } : { CLAUDE_CONFIG_DIR: configDir }) },
           detached: true, stdio: 'ignore', windowsHide: false,
         });
         await new Promise((resolve, reject) => {
@@ -819,13 +828,13 @@ async function handler(req, res) {
       if (!fs.existsSync(configDir)) return sendJson(res, 400, { error: 'Config folder does not exist.' });
       const key = `${id}:${body.kind}`;
       if (Date.now() - (openStartedAt.get(key) || 0) < 5000) return sendJson(res, 409, { error: 'Claude was just opened for this account.' });
-      const codex = account.provider === 'codex';
-      if (codex && body.kind === 'desktop') return sendJson(res, 400, { error: 'Codex has no separate Desktop profile here. Use Open Codex.' });
-      const env = { ...process.env, ...(codex ? { CODEX_HOME: configDir } : { CLAUDE_CONFIG_DIR: configDir }) };
+      const cliProv = isCliProvider(account.provider) ? CLI_PROVIDERS[account.provider] : null;
+      if (cliProv && body.kind === 'desktop') return sendJson(res, 400, { error: `${cliProv.label} has no separate Desktop profile here. Use Open ${cliProv.label}.` });
+      const env = { ...process.env, ...(cliProv ? { [cliProv.env]: configDir } : { CLAUDE_CONFIG_DIR: configDir }) };
       /** @type {[string, string[], import('node:child_process').SpawnOptions]} */
       let launch;
       if (body.kind === 'code') {
-        launch = ['cmd.exe', ['/k', codex ? 'codex' : 'claude'], { env, cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: false }];
+        launch = ['cmd.exe', ['/k', cliProv ? cliProv.command : 'claude'], { env, cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: false }];
       } else {
         const profile = desktopProfileFor(configDir, os.homedir());
         if (!profile) return sendJson(res, 400, { error: 'Claude Desktop profiles exist for ~/.claude and ~/.claude-<name> folders only.' });

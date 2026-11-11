@@ -3,6 +3,8 @@ export interface UsageWindow {
   label: string;
   used: number;
   resetsAt: string | null;
+  /** Length of the window when it is not the standard 5-hour or weekly one (a monthly credit period). */
+  lengthMs?: number;
   /** Cached reading whose reset time has passed: `used` describes the previous period. */
   expired?: boolean;
 }
@@ -24,7 +26,7 @@ export interface Account {
   name: string;
   configDir: string;
   /** Absent for Claude Code accounts. */
-  provider?: 'codex';
+  provider?: 'codex' | 'grok';
   fetchedAt: number;
   plan?: string | null;
   seatTier?: 'standard' | 'premium' | null;

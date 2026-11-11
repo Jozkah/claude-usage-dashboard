@@ -3,15 +3,17 @@ import type { Account, Level, UsageWindow } from './types';
 export const levelFor = (used: number): Level => (used >= 85 ? 'bad' : used >= 60 ? 'warn' : 'good');
 export const colorVar = (l: Level) => `var(--${l})`;
 
-export function windowLength(key: string): number | null {
+export function windowLength(key: string, lengthMs?: number): number | null {
+  if (lengthMs && lengthMs > 0) return lengthMs;
   if (key === 'five_hour') return 5 * 3600e3;
   if (key.startsWith('seven_day')) return 7 * 864e5;
+  if (key === 'monthly') return 30 * 864e5;
   return null;
 }
 
 /** 0..1 share of the window that has already passed, or null if unknown. */
 export function elapsedFraction(w: UsageWindow, now: number): number | null {
-  const len = windowLength(w.key);
+  const len = windowLength(w.key, w.lengthMs);
   if (!len || !w.resetsAt) return null;
   const left = new Date(w.resetsAt).getTime() - now;
   const e = 1 - left / len;

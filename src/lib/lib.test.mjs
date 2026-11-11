@@ -159,3 +159,90 @@ test('planTier maps Claude and Codex plan names to colour tiers', () => {
   assert.equal(planTier(null), 'unknown');
   assert.equal(planTier('Mystery'), 'unknown');
 });
+
+import { checkpoints, paceInfo, valueAt } from './pace.ts';
+
+test('checkpoints: a block per day, today since the last midnight', () => {
+  const now = new Date(2026, 10, 11, 15, 0).getTime(); // Wed 15:00
+  const end = new Date(2026, 10, 14, 7, 0).getTime();
+  const w = { key: 'seven_day', label: 'Weekly', used: 40, resetsAt: new Date(end).toISOString() };
+  const start = end - 7 * DAY;
+  const at = (d, h, v) => [new Date(2026, 10, d, h, 0).getTime(), v];
+  const pts = [[start + HOUR, 1], at(8, 23, 8), at(9, 1, 10), at(9, 23, 20), at(10, 1, 22), at(10, 23, 30), at(11, 1, 32), at(11, 12, 38)];
+  const c = checkpoints(pts, w, now);
+  assert.equal(c.unit, 'day');
+  assert.deepEqual(c.marks.map((m) => m.used === null ? null : Math.round(m.used)).slice(-3), [21, 31, 40]);
+  assert.equal(Math.round(c.sinceLast), 9); // 40 now, 31 at the last midnight
+  assert.equal(Math.round(c.previous), 10); // 31 - 21
+});
+
+test('checkpoints: unknown without a reset or after the window ended', () => {
+  assert.equal(checkpoints([], { key: 'seven_day', label: 'W', used: 5 }, Date.now()), null);
+  assert.equal(checkpoints([], { key: 'seven_day', label: 'W', used: 5, expired: true, resetsAt: new Date(Date.now() + DAY).toISOString() }, Date.now()), null);
+});
+
+test('valueAt interpolates close readings and refuses stale ones', () => {
+  const pts = [[0, 10], [HOUR, 20]];
+  assert.equal(Math.round(valueAt(pts, HOUR / 2)), 15);
+  assert.equal(valueAt(pts, -1), null);
+  assert.equal(valueAt(pts, 20 * HOUR), null); // the last reading is too old to trust
+});
+
+test('paceInfo projects from the recent rate and flags a limit that will run out', () => {
+  const now = Date.now();
+  const w = { key: 'five_hour', label: '5h', used: 60, resetsAt: new Date(now + 2 * HOUR).toISOString() };
+  // 3h elapsed, 60% used; the last hour alone added 30%: ~30%/h
+  const pts = [[now - 3 * HOUR, 0], [now - HOUR, 30], [now, 60]];
+  const p = paceInfo(pts, w, now);
+  assert.equal(p.tone, 'bad');
+  assert.match(p.label, /Runs out in/);
+  assert.ok(p.runsOutAt < now + 2 * HOUR);
+  assert.ok(p.projected >= 100);
+});
+
+test('paceInfo: a slow week has room to spare and reports a daily allowance', () => {
+  const now = Date.now();
+  const w = { key: 'seven_day', label: 'Weekly', used: 20, resetsAt: new Date(now + 3.5 * DAY).toISOString() };
+  const pts = [[now - 3.5 * DAY, 0], [now - DAY, 14], [now, 20]];
+  const p = paceInfo(pts, w, now);
+  assert.equal(p.tone, 'good');
+  assert.equal(p.perUnit, 'day');
+  assert.ok(Math.abs(p.allowance - 80 / 3.5) < 0.01);
+  assert.equal(paceInfo(pts, { ...w, resetsAt: undefined }, now), null);
+  assert.equal(paceInfo(pts, { ...w, used: 100 }, now).label, 'Limit reached');
+});
+
+import { initials, poolLimits } from './pool.ts';
+
+test('poolLimits: one row per limit, one segment per account, pooled mean and refill', () => {
+  const now = Date.now();
+  const win = (key, used, ms) => ({ key, label: key, used, resetsAt: new Date(now + ms).toISOString() });
+  const acc = (id, name, windows, status = 'ok') => ({ id, name, status, windows });
+  const accounts = [
+    acc('a', 'Personal', [win('five_hour', 74, 2.5 * HOUR), win('seven_day', 99, 3 * DAY)]),
+    acc('b', 'Work 2', [win('five_hour', 0, 5 * HOUR), win('seven_day', 0, 7 * DAY)]),
+    acc('c', 'Broken', [], 'error'),
+  ];
+  const [g] = poolLimits(accounts, () => 'claude', now);
+  assert.deepEqual(g.rows.map((r) => r.label), ['Session', 'Weekly']);
+  const session = g.rows[0];
+  assert.equal(session.segments.length, 3);
+  assert.equal(session.segments[2].left, null); // account without a reading keeps its slot
+  assert.equal(Math.round(session.left), 63);   // (26 + 100) / 2
+  assert.equal(Math.round(session.refill), 37);
+  assert.equal(Math.round(session.resetIn / HOUR * 10) / 10, 2.5);
+  assert.equal(session.pace.label, 'On pace'); // 37% used against a mean of 25% of the window gone, inside the 12-point band
+});
+
+test('poolLimits groups providers separately and skips expired windows; initials', () => {
+  const now = Date.now();
+  const exp = { key: 'five_hour', label: 'x', used: 10, expired: true, resetsAt: new Date(now - HOUR).toISOString() };
+  const groups = poolLimits([
+    { id: 'a', name: 'A', status: 'ok', windows: [exp] },
+    { id: 'c', name: 'Codex', status: 'ok', windows: [{ key: 'seven_day', label: 'Weekly', used: 16, resetsAt: new Date(now + DAY).toISOString() }] },
+  ], (a) => (a.id === 'c' ? 'codex' : 'claude'), now);
+  assert.deepEqual(groups.map((g) => g.provider), ['codex']);
+  assert.equal(initials('Work (Shared)'), 'WS');
+  assert.equal(initials('Work 2'), 'W2');
+  assert.equal(initials('Codex'), 'CO');
+});

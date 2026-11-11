@@ -1,55 +1,74 @@
-import { useState } from 'react';
-import { Bell, BellOff, LayoutGrid, Menu, Moon, RefreshCw, Sparkles, Sun } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Bell, BellOff, Moon, RefreshCw, Sparkles, Sun } from 'lucide-react';
 
 interface Props {
-  crumb: string;
   dark: boolean;
   loading: boolean;
   onToggleTheme: () => void;
   onRefresh: () => void;
-  onMenu: () => void;
-  menuOpen?: boolean;
   notify?: { supported: boolean; enabled: boolean; toggle: () => void };
   effects?: { on: boolean; toggle: () => void };
 }
 
-const iconBtn =
-  'grid size-8 place-items-center rounded-lg border border-line bg-card text-muted-fg shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:text-fg';
+const SECTIONS = [
+  { id: 'limits', label: 'Limits' },
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'resets', label: 'Resets' },
+  { id: 'usage', label: 'Usage' },
+] as const;
 
-export function Header({ crumb, dark, loading, onToggleTheme, onRefresh, onMenu, menuOpen = false, notify, effects }: Props) {
+const iconBtn = 'grid size-8 place-items-center rounded-lg text-muted-fg transition-[color,background-color,transform] duration-150 hover:bg-frame hover:text-fg active:scale-[0.96]';
+
+/** A plain sticky bar: name and section links on the left, small tools on the right. */
+export function Header({ dark, loading, onToggleTheme, onRefresh, notify, effects }: Props) {
   // keep the icon spinning for a moment so a click on cached data still visibly does something
   const [spin, setSpin] = useState(false);
+  const [current, setCurrent] = useState<string>('limits');
   const refresh = () => {
     setSpin(true);
     setTimeout(() => setSpin(false), 900);
     onRefresh();
   };
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => entries.forEach((e) => { if (e.isIntersecting) setCurrent(e.target.id); }), { rootMargin: '-35% 0px -60% 0px' });
+    SECTIONS.forEach((s) => { const el = document.getElementById(s.id); if (el) io.observe(el); });
+    return () => io.disconnect();
+  }, []);
+
   return (
-    <header className="sticky top-0 z-20 flex h-12 items-center justify-between gap-3 border-b border-line bg-bg/75 px-4 backdrop-blur-xl sm:px-6">
-      <div className="flex min-w-0 items-center gap-2.5 text-[13px]">
-        <button onClick={onMenu} className={`${iconBtn} shrink-0 lg:hidden`} aria-label="Menu" aria-expanded={menuOpen} aria-controls="mobile-sidebar"><Menu className="size-4" /></button>
-        <LayoutGrid className="size-3.5 shrink-0 text-subtle-fg" />
-        <span className="hidden text-muted-fg sm:inline">Overview</span>
-        <span className="hidden text-subtle-fg sm:inline">/</span>
-        <span className="truncate font-medium">{crumb}</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <button onClick={refresh} className={iconBtn} aria-label="Refresh now" title="Refresh now">
-          <RefreshCw className={`size-3.5 ${loading || spin ? 'animate-[spin-slow_0.9s_linear_infinite]' : ''}`} />
-        </button>
-        {notify?.supported && (
-          <button onClick={notify.toggle} className={iconBtn} aria-label="Limit notifications" aria-pressed={notify.enabled} title={notify.enabled ? 'Notifications on (85% and resets)' : 'Notify at 85% and on resets'}>
-            {notify.enabled ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
+    <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur-sm">
+      <div className="mx-auto flex h-12 w-full max-w-[1040px] items-center gap-6 px-4 sm:px-5">
+        <span className="text-[14px] font-bold tracking-tight">Usage</span>
+        <nav aria-label="Sections" className="-mb-px flex h-full min-w-0 flex-1 gap-1 overflow-x-auto">
+          {SECTIONS.map(({ id, label }) => (
+            <a
+              key={id} href={`#${id}`} aria-current={current === id ? 'true' : undefined}
+              className={`flex h-full items-center border-b-2 px-2.5 text-[13.5px] font-medium transition-colors duration-150 ${current === id ? 'border-fg text-fg' : 'border-transparent text-muted-fg hover:text-fg'}`}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button onClick={refresh} className={iconBtn} aria-label="Refresh now" title="Refresh now">
+            <RefreshCw className={`size-4 ${loading || spin ? 'animate-[spin-slow_0.9s_linear_infinite]' : ''}`} />
           </button>
-        )}
-        {effects && (
-          <button onClick={effects.toggle} className={iconBtn} aria-label="Background effects" aria-pressed={effects.on} title={effects.on ? 'Background effects on' : 'Background effects off'}>
-            <Sparkles className={`size-3.5 ${effects.on ? '' : 'opacity-50'}`} />
+          {notify?.supported && (
+            <button onClick={notify.toggle} className={iconBtn} aria-label="Limit notifications" aria-pressed={notify.enabled} title={notify.enabled ? 'Notifications on (85% and resets)' : 'Notify at 85% and on resets'}>
+              {notify.enabled ? <Bell className="size-4" /> : <BellOff className="size-4" />}
+            </button>
+          )}
+          {effects && (
+            <button onClick={effects.toggle} className={iconBtn} aria-label="Motion effects" aria-pressed={effects.on} title={effects.on ? 'Motion effects on' : 'Motion effects off'}>
+              <Sparkles className={`size-4 ${effects.on ? '' : 'opacity-50'}`} />
+            </button>
+          )}
+          <button onClick={onToggleTheme} className={iconBtn} aria-label="Dark theme" aria-pressed={dark} title="Toggle theme">
+            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>
-        )}
-        <button onClick={onToggleTheme} className={iconBtn} aria-label="Dark theme" aria-pressed={dark} title="Toggle theme">
-          {dark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-        </button>
+        </div>
       </div>
     </header>
   );

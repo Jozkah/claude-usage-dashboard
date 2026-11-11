@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { Hourglass, WifiOff, X } from 'lucide-react';
+import { Hourglass, Plus, WifiOff, X } from 'lucide-react';
 import { openClaude, removeAccount, setTeamSeat, shareLocalChats, syncAllAccounts, startAccountLogin, syncCodeSetup, syncDesktopChats, syncDesktopLabels, useNow, useUsage } from './lib/api';
 import { useTheme } from './lib/theme';
 import { useAlerts, useNotifyPref } from './lib/alerts';
 import { useEffectsPref } from './lib/effects';
-import { trapTab } from './lib/keyboard';
 import type { Account, RangeKey } from './lib/types';
-import { Aurora } from './components/Aurora';
+import { headroom } from './lib/format';
 import { Header } from './components/Header';
-import { Sidebar } from './components/Sidebar';
-import { StatRow } from './components/StatRow';
 import { TrendCard } from './components/TrendCard';
 import { ResetTimeline } from './components/ResetTimeline';
-import { AccountCard } from './components/AccountCard';
+import { AccountRow } from './components/AccountRow';
+import { PooledLimits } from './components/PooledLimits';
 import { AccountMenu, type MenuAction } from './components/AccountMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LimitTable } from './components/LimitTable';
@@ -21,8 +19,6 @@ import { Ago } from './components/Countdown';
 import { SyncSetupDialog } from './components/SyncSetupDialog';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { Modal } from './components/Modal';
-
-type WithInert = HTMLElement & { inert?: boolean };
 
 export default function App() {
   const { data, loading, error, stalled, lastLoad, refresh, restart } = useUsage();
@@ -35,16 +31,12 @@ export default function App() {
   const [selected, setSelected] = useState('all');
   const [range, setRange] = useState<RangeKey>('24h');
   const [addOpen, setAddOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [searchReq, setSearchReq] = useState(0);
-  const [search, setSearch] = useState('');
   const [toRemove, setToRemove] = useState<Account | null>(null);
   const [removeError, setRemoveError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [contextAccount, setContextAccount] = useState<{ account: Account; x: number; y: number } | null>(null);
   const [setup, setSetup] = useState<{ open: boolean; sourceId: string; targetId: string }>({ open: false, sourceId: '', targetId: '' });
   const [notice, setNotice] = useState<string | null>(null);
-  const drawer = useRef<HTMLElement>(null);
 
   const accounts = useMemo(() => data?.accounts ?? [], [data]);
   const visible = selected === 'all' ? accounts : accounts.filter((a) => a.id === selected);
@@ -86,10 +78,11 @@ export default function App() {
   };
 
   const menuActions = (target: Account): MenuAction[] => {
-    if (target.provider === 'codex') {
-      return [{ label: `Open Codex as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name, 'Codex'), 'Could not open Codex.') }];
+    if (target.provider) {
+      const product = target.provider === 'grok' ? 'Grok' : 'Codex';
+      return [{ label: `Open ${product} as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name, product), `Could not open ${product}.`) }];
     }
-    const claude = accounts.filter((a) => a.provider !== 'codex');
+    const claude = accounts.filter((a) => !a.provider);
     const out: MenuAction[] = [
       { label: `Open Claude Code as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'code', target.name), 'Could not open Claude Code.') },
       { label: `Open Claude Desktop as ${target.name}`, run: () => void runAction(() => openClaude(target.id, 'desktop', target.name), 'Could not open Claude Desktop.') },
@@ -157,52 +150,7 @@ export default function App() {
     return () => { timers.forEach(clearTimeout); timers.clear(); };
   }, []);
 
-  // ⌘K / Ctrl+K focuses the account search (opening the drawer only on narrow screens)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (!matchMedia('(min-width: 1024px)').matches) setMenuOpen(true);
-        setSearchReq((n) => n + 1);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // mobile drawer: hidden from tab order and screen readers while closed
-  useEffect(() => {
-    if (drawer.current) (drawer.current as WithInert).inert = !menuOpen;
-  }, [menuOpen]);
-
-  // focus the visible search field after ⌘K or when the drawer opens; give focus back on close
-  const searchSeen = useRef(0);
-  useEffect(() => {
-    const requested = searchReq !== searchSeen.current;
-    searchSeen.current = searchReq;
-    if (!menuOpen && !requested) return;
-    const opener = document.activeElement as HTMLElement | null;
-    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-account-search]'));
-    inputs.find((el) => el.getClientRects().length > 0 && !el.closest('[inert]'))?.focus(); // the visible copy, not the hidden or inert one
-    return () => {
-      if (!menuOpen) return;
-      // Safari does not focus a button on click, so fall back to the Menu button itself
-      const back = opener && opener !== document.body ? opener : document.querySelector<HTMLElement>('button[aria-controls="mobile-sidebar"]');
-      if (back && document.contains(back)) back.focus();
-    };
-  }, [menuOpen, searchReq]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-      else trapTab(e, drawer.current); // Tab / Shift+Tab wrap inside the open drawer
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen]);
-
-  const select = useCallback((id: string) => { setSelected(id); setMenuOpen(false); setNotice(null); }, []);
+  const select = useCallback((id: string) => { setSelected(id); setNotice(null); }, []);
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const onAdded = useCallback(() => void refresh(true), [refresh]);
   const closeRemove = useCallback(() => { setToRemove(null); setRemoveError(''); }, []);
@@ -229,130 +177,126 @@ export default function App() {
     }
   };
 
-  const crumb = selected === 'all' ? 'All accounts' : accounts.find((a) => a.id === selected)?.name ?? 'Account';
-
-  const sidebar = (
-    <Sidebar
-      accounts={accounts} selected={selected} onSelect={select} onAdd={() => { setAddOpen(true); setMenuOpen(false); }}
-      search={search} onSearch={setSearch} lastLoad={lastLoad} mock={!!data?.mock}
-    />
-  );
+  const ok = accounts.filter((a) => a.status === 'ok' && a.windows?.length);
+  const best = ok.length > 1 ? [...ok].sort((a, b) => headroom(b) - headroom(a))[0] : undefined;
+  const headline = best ? `Most room: ${best.name}` : 'Usage limits';
+  const hint = `${accounts.length || 'Your'} account${accounts.length === 1 ? '' : 's'} across Claude Code and Codex. Bars show what is left; the tick is even pacing.`;
+  const pick = (id: string) => { select(id); document.getElementById('accounts')?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); };
 
   return (
-    <div className="relative flex h-full">
-      <Aurora />
+    <div className="relative min-h-full overflow-x-hidden">
+      <Header dark={dark} loading={loading} onToggleTheme={toggle} onRefresh={() => void refresh(true)} notify={notify} effects={effects} />
 
-      {/* desktop sidebar */}
-      <aside className="relative z-10 hidden w-[256px] shrink-0 border-r border-line lg:block">{sidebar}</aside>
+      <main className="relative z-10 mx-auto w-full max-w-[1040px] px-4 pt-8 pb-24 sm:px-5">
+        <header className="animate-rise">
+          <h1 className="text-[26px] leading-tight font-bold tracking-[-0.03em]">{headline}</h1>
+          <p className="mt-1.5 max-w-[60ch] text-[14px] leading-relaxed text-muted-fg text-pretty">{hint}</p>
+        </header>
 
-      {/* mobile sidebar */}
-      <div className={`fixed inset-0 z-40 lg:hidden ${menuOpen ? '' : 'pointer-events-none'}`}>
-        <div className={`absolute inset-0 bg-black/40 transition-opacity ${menuOpen ? 'opacity-100' : 'opacity-0'}`} onClick={() => setMenuOpen(false)} />
-        <aside
-          id="mobile-sidebar"
-          ref={drawer}
-          role="dialog"
-          aria-label="Accounts"
-          aria-modal={menuOpen}
-          className={`absolute inset-y-0 left-0 w-[272px] border-r border-line transition-transform duration-300 ease-out-expo ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        >
-          {sidebar}
-        </aside>
-      </div>
-
-      <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <Header
-          crumb={crumb} dark={dark} loading={loading} onToggleTheme={toggle} onRefresh={() => void refresh(true)}
-          onMenu={() => setMenuOpen(true)} menuOpen={menuOpen} notify={notify} effects={effects}
-        />
-
-        <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-7 pb-14 sm:px-6">
-          <div className="animate-rise mb-6">
-            <h1 className="shiny text-[28px] leading-tight font-semibold tracking-tight">Your Claude limits</h1>
-            <p className="mt-1 text-sm text-muted-fg">
-              Live usage across {accounts.length || 'your'} account{accounts.length === 1 ? '' : 's'}, including what you use on your phone and other computers.
-            </p>
-          </div>
-
+        <div className="mt-7 flex flex-col gap-4">
           {error && (
-            <div role="alert" className="animate-rise mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm">
+            <div role="alert" className="animate-rise flex flex-wrap items-center gap-3 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm">
               <WifiOff className="size-4 shrink-0 text-bad" />
               <span className="min-w-0 flex-1">
                 The dashboard server isn’t reachable ({error}).
                 {data && lastLoad ? <> Showing the last reading from <Ago since={lastLoad} />.</> : null}
               </span>
-              <button onClick={() => void refresh(true)} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium transition-colors hover:border-accent/50">Retry</button>
+              <button onClick={() => void refresh(true)} className="rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-semibold transition-transform active:scale-[0.96]">Retry</button>
             </div>
           )}
 
           {stalled && !error && (
-            <div role="status" className="animate-rise mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+            <div role="status" className="animate-rise flex flex-wrap items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
               <Hourglass className="size-4 shrink-0 text-warn" />
               <span className="min-w-0 flex-1">
                 The dashboard server is slow to answer.{data && lastLoad ? <> Showing the last reading from <Ago since={lastLoad} />.</> : ' Still waiting for the first reading.'}
               </span>
-              <button onClick={restart} className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-medium transition-colors hover:border-accent/50">Cancel and retry</button>
+              <button onClick={restart} className="rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-semibold transition-transform active:scale-[0.96]">Cancel and retry</button>
             </div>
           )}
 
           {notice && (
-            <div role="status" className="mb-5 flex items-start gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm">
+            <div role="status" className="flex items-start gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm">
               <span className="min-w-0 flex-1">{notice}</span>
               <button onClick={() => setNotice(null)} aria-label="Dismiss message" className="rounded-md p-0.5 text-muted-fg transition-colors hover:bg-frame hover:text-fg"><X className="size-4" /></button>
             </div>
           )}
 
           {!data && !error && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {[0, 1, 2, 3].map((i) => <div key={i} className="h-[178px] animate-pulse rounded-xl border border-line bg-frame" />)}
+            <div className="panel overflow-hidden">
+              {[0, 1, 2].map((i) => <div key={i} className="h-[118px] animate-pulse border-t border-line bg-frame/50 first:border-t-0" />)}
             </div>
           )}
 
           {data && (
-            <div className="flex flex-col gap-4">
-              <ErrorBoundary label="Summary cards"><StatRow accounts={visible} now={now} tick={tick} /></ErrorBoundary>
+            <>
+              <section id="limits" className="scroll-mt-16">
+                <h2 className="mb-3 px-1 text-[18px] font-bold tracking-[-0.02em]">Limits</h2>
+                <PooledLimits accounts={accounts} now={now} onPick={pick} />
+              </section>
 
-              <div className="grid gap-4 xl:grid-cols-3">
-                <div className="min-w-0 xl:col-span-2">
-                  <ErrorBoundary label="Usage trend"><TrendCard accounts={accounts} preferredId={selected} tick={tick} range={range} onRange={setRange} /></ErrorBoundary>
+              <section id="accounts" className="mt-8 scroll-mt-16">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
+                  <h2 className="text-[18px] font-bold tracking-[-0.02em]">Accounts</h2>
+                  <div className="flex items-center gap-2">
+                    {accounts.length > 1 && (
+                      <div role="group" aria-label="Show accounts" className="flex rounded-lg border border-line bg-frame p-0.5 text-[12.5px]">
+                        {[{ id: 'all', name: 'All' }, ...accounts].map((a) => (
+                          <button
+                            key={a.id} onClick={() => select(a.id)} aria-pressed={selected === a.id}
+                            className={`relative max-w-[120px] truncate rounded-md px-2.5 py-1 font-medium transition-[color,background-color] duration-150 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] ${selected === a.id ? 'bg-card text-fg shadow-[0_1px_2px_rgba(0,0,0,0.12)]' : 'text-muted-fg hover:text-fg'}`}
+                          >
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-[13px] font-semibold transition-[transform,border-color] duration-150 active:scale-[0.96] hover:border-fg/40">
+                      <Plus className="size-3.5" /> Add account
+                    </button>
+                  </div>
                 </div>
-                <ErrorBoundary label="Upcoming resets"><ResetTimeline accounts={accounts} now={now} /></ErrorBoundary>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between">
-                <h2 className="text-[15px] font-semibold tracking-tight">Accounts</h2>
-                <button onClick={() => setAddOpen(true)} className="rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-accent/50">
-                  + Add account
-                </button>
-              </div>
-              <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))]">
-                {visible.map((a, i) => (
-                  <ErrorBoundary key={a.id} label={a.name}>
-                    <AccountCard
-                      account={a} now={now} delay={i * 80} onRemove={setToRemove} onLogin={signInForUsage}
-                      onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)} onLongPress={(x, y) => openMenuAt(a, x, y)}
-                    />
-                  </ErrorBoundary>
-                ))}
-              </div>
-              {visible.length === 0 && (
-                <div className="rounded-xl border border-dashed border-line p-10 text-center text-sm text-muted-fg">
-                  No accounts yet. Use “Add account” to start.
+                <div className="panel overflow-hidden">
+                  {visible.map((a) => (
+                    <ErrorBoundary key={a.id} label={a.name}>
+                      <AccountRow
+                        account={a} now={now} best={!!best && best.id === a.id && selected === 'all'} onRemove={setToRemove} onLogin={signInForUsage}
+                        onContextMenu={(e) => openAccountMenu(a, e)} onMenu={(el) => openMenuFromButton(a, el)} onLongPress={(x, y) => openMenuAt(a, x, y)}
+                      />
+                    </ErrorBoundary>
+                  ))}
+                  {visible.length === 0 && <div className="p-10 text-center text-sm text-muted-fg">No accounts yet. Use “Add account” to start.</div>}
                 </div>
-              )}
+              </section>
 
-              <ErrorBoundary label="Limit monitor"><LimitTable accounts={visible} now={now} /></ErrorBoundary>
+              <section id="resets" className="mt-10 scroll-mt-16">
+                <h2 className="mb-1 px-1 text-[18px] font-bold tracking-[-0.02em]">Resets and trend</h2>
+                <p className="mb-4 px-1 text-[13.5px] text-subtle-fg">When each window refills, how fast you are spending it, and the limits behind every account.</p>
+                <div className="flex flex-col gap-4">
+                  <div className="grid gap-4 lg:grid-cols-5">
+                    <div className="min-w-0 lg:col-span-3">
+                      <ErrorBoundary label="Usage trend"><TrendCard accounts={accounts} preferredId={selected} tick={tick} range={range} onRange={setRange} /></ErrorBoundary>
+                    </div>
+                    <div className="min-w-0 lg:col-span-2">
+                      <ErrorBoundary label="Upcoming resets"><ResetTimeline accounts={accounts} now={now} /></ErrorBoundary>
+                    </div>
+                  </div>
+                  <ErrorBoundary label="Limit monitor"><LimitTable accounts={visible} now={now} /></ErrorBoundary>
+                </div>
+              </section>
 
-              <ErrorBoundary label="Daily usage"><DailyUsage /></ErrorBoundary>
-            </div>
+              <section id="usage" className="mt-10 scroll-mt-16">
+                <ErrorBoundary label="Daily usage"><DailyUsage /></ErrorBoundary>
+              </section>
+            </>
           )}
+        </div>
 
-          <p className="mt-8 text-xs leading-relaxed text-subtle-fg">
-            Numbers come from Anthropic’s own account totals through an unofficial endpoint, so they can change without notice.
-            Logins are read locally and never leave your machine.
-          </p>
-        </main>
-      </div>
+        <p className="mt-14 text-center text-xs leading-relaxed text-subtle-fg">
+          {data?.mock ? 'Sample data. ' : ''}Numbers come from each provider’s own account totals through unofficial endpoints, so they can change without notice.
+          Logins are read locally and never leave your machine.
+        </p>
+      </main>
 
       <AddAccountDialog open={addOpen} onClose={closeAdd} onAdded={onAdded} />
       {contextAccount && (

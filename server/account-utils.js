@@ -1,4 +1,5 @@
 /* Pure helpers for accounts, history and credentials; imported by server/index.js. */
+import { isCliProvider } from './cli-providers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,8 +23,8 @@ export function normalizeAccounts(list) {
       && ['id', 'name', 'configDir'].every((k) => typeof a[k] === 'string' && a[k].trim());
     if (!ok || seen.has(a.id)) { dropped.push(a); continue; }
     seen.add(a.id);
-    accounts.push({ id: a.id, name: a.name, configDir: a.configDir, ...(a.provider === 'codex' ? { provider: 'codex' } : {}),
-      ...(['standard', 'premium'].includes(a.seatTier) && a.provider !== 'codex' ? { seatTier: a.seatTier } : {}) });
+    accounts.push({ id: a.id, name: a.name, configDir: a.configDir, ...(isCliProvider(a.provider) ? { provider: a.provider } : {}),
+      ...(['standard', 'premium'].includes(a.seatTier) && !isCliProvider(a.provider) ? { seatTier: a.seatTier } : {}) });
   }
   return { accounts, dropped };
 }

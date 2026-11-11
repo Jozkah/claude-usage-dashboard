@@ -9,13 +9,20 @@ interface Props {
   onAdded: () => void;
 }
 
+type Service = 'claude' | 'codex' | 'grok';
+const SERVICES: Record<Service, { label: string; product: string; folder: string; dir: string; env: string; login: string }> = {
+  claude: { label: 'Claude Code', product: 'Claude Code', folder: 'Claude config folder', dir: '', env: 'CLAUDE_CONFIG_DIR', login: 'claude auth login' },
+  codex: { label: 'Codex (ChatGPT plan)', product: 'Codex', folder: 'Codex folder', dir: '~/.codex', env: 'CODEX_HOME', login: 'codex login' },
+  grok: { label: 'Grok Build', product: 'Grok', folder: 'Grok folder', dir: '~/.grok', env: 'GROK_HOME', login: 'grok login' },
+};
+
 const inputCls =
   'w-full rounded-lg border border-line bg-frame px-3 py-2 text-sm outline-none transition-shadow placeholder:text-subtle-fg focus:ring-2 focus:ring-accent/40';
 
 export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, onAdded }: Props) {
   const [name, setName] = useState('');
   const [dir, setDir] = useState('');
-  const [codex, setCodex] = useState(false);
+  const [service, setService] = useState<Service>('claude');
   const [create, setCreate] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,7 +31,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
   openRef.current = open;
 
   useEffect(() => {
-    if (open) { setName(''); setDir(''); setCodex(false); setCreate(false); setError(''); setBusy(false); }
+    if (open) { setName(''); setDir(''); setService('claude'); setCreate(false); setError(''); setBusy(false); }
   }, [open]);
 
   const submit = async (e: FormEvent) => {
@@ -32,7 +39,7 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
     setBusy(true);
     setError('');
     let err: string | null;
-    try { err = await addAccount(name, dir, codex ? 'codex' : undefined, codex && create); }
+    try { err = await addAccount(name, dir, service === 'claude' ? undefined : service, service !== 'claude' && create); }
     catch (ex) { err = ex instanceof Error ? ex.message : 'Could not add the account.'; }
     finally { setBusy(false); }
     if (!openRef.current) return; // dialog was closed while the request ran
@@ -49,32 +56,32 @@ export const AddAccountDialog = memo(function AddAccountDialog({ open, onClose, 
 
         <fieldset className="mt-4">
           <legend className="mb-1.5 block text-xs font-medium text-muted-fg">Service</legend>
-          <div className="flex gap-2">
-            {([['Claude Code', false], ['Codex (ChatGPT plan)', true]] as const).map(([label, value]) => (
-              <button type="button" key={label} aria-pressed={codex === value}
-                onClick={() => { setCodex(value); if (!dir || dir === '~/.codex') setDir(value ? '~/.codex' : ''); }}
-                className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${codex === value ? 'border-accent bg-frame font-medium' : 'border-line hover:bg-frame'}`}>
-                <span className="flex items-center gap-2"><ProviderIcon provider={value ? 'codex' : 'claude'} title={false} />{label}</span>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(SERVICES) as Service[]).map((value) => (
+              <button type="button" key={value} aria-pressed={service === value}
+                onClick={() => { setService(value); if (!dir || Object.values(SERVICES).some((x) => x.dir === dir)) setDir(SERVICES[value].dir); }}
+                className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${service === value ? 'border-fg bg-frame font-medium' : 'border-line hover:bg-frame'}`}>
+                <span className="flex items-center gap-2"><ProviderIcon provider={value} title={false} />{SERVICES[value].label}</span>
               </button>
             ))}
           </div>
         </fieldset>
 
-        <label className="mt-4 mb-1.5 block text-xs font-medium text-muted-fg" htmlFor="acc-dir">{codex ? 'Codex folder' : 'Claude config folder'}</label>
-        <input id="acc-dir" required className={inputCls} placeholder={codex ? '~/.codex' : '~/.claude-work'} value={dir} onChange={(e) => setDir(e.target.value)} />
+        <label className="mt-4 mb-1.5 block text-xs font-medium text-muted-fg" htmlFor="acc-dir">{SERVICES[service].folder}</label>
+        <input id="acc-dir" required className={inputCls} placeholder={SERVICES[service].dir || '~/.claude-work'} value={dir} onChange={(e) => setDir(e.target.value)} />
         <p className="mt-2 text-xs leading-relaxed text-muted-fg">
-          {codex ? (
-            <>The folder Codex stores its login in (<code className="rounded bg-frame px-1">CODEX_HOME</code>, usually <code className="rounded bg-frame px-1">~/.codex</code>). Sign in once with <code className="rounded bg-frame px-1">codex login</code> first.</>
-          ) : (
+          {service === 'claude' ? (
             <>The folder that account logs into (its <code className="rounded bg-frame px-1">CLAUDE_CONFIG_DIR</code>).
               Log in there once with Claude Code first. Running in Docker? Mount the folder under <code className="rounded bg-frame px-1">/accounts</code> instead.</>
+          ) : (
+            <>The folder {SERVICES[service].product} stores its login in (<code className="rounded bg-frame px-1">{SERVICES[service].env}</code>, usually <code className="rounded bg-frame px-1">{SERVICES[service].dir}</code>). Sign in once with <code className="rounded bg-frame px-1">{SERVICES[service].login}</code> first.</>
           )}
         </p>
 
-        {codex && (
+        {service !== 'claude' && (
           <label className="mt-3 flex items-center gap-2 text-xs text-muted-fg">
             <input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />
-            Create the folder if it does not exist (for a second Codex login, e.g. <code className="rounded bg-frame px-1">~/.codex-work</code>)
+            Create the folder if it does not exist (for a second {SERVICES[service].product} login, e.g. <code className="rounded bg-frame px-1">{SERVICES[service].dir}-work</code>)
           </label>
         )}
 
