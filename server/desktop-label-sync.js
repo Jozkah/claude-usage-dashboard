@@ -242,9 +242,10 @@ function syncDesktopTitles(profiles, targets = profiles, stateDir, sourceProfile
     const last = state[id];
     const renamed = last === undefined ? [] : named.filter((record) => record.value.title !== last);
     const candidates = renamed.length ? renamed : named;
+    // The source profile only breaks ties between candidates: a rename made anywhere else must not be reverted to the source's old title.
     const sourceRecords = sourceProfileId
       ? profiles.filter((profile) => profile.profileId === sourceProfileId)
-        .flatMap((profile) => [...profile.records.values()]).filter((record) => named.includes(record))
+        .flatMap((profile) => [...profile.records.values()]).filter((record) => candidates.includes(record))
       : [];
     const newest = [...(sourceRecords.length ? sourceRecords : candidates)].sort((a, b) => b.mtime - a.mtime)[0];
     let allUpdated = true;

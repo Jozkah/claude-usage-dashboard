@@ -200,6 +200,23 @@ test('Personal controls group assignments and titles across three profiles', asy
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a chat renamed in another profile is not reverted by the Personal source', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-rename-labels-'));
+  try {
+    const personal = await makeProfile(root, 'personal');
+    const work = await makeProfile(root, 'work');
+    const titleFile = (profile) => path.join(profile, 'claude-code-sessions', `${path.basename(profile)}-scope`, 'device', 'local_a.json');
+    for (const profile of [personal, work]) fs.writeFileSync(titleFile(profile), JSON.stringify({ sessionId: 'local_a', title: 'Old name' }));
+    const run = () => syncMergedDesktopLabelsMany({ personal, work }, { sourceId: 'personal', stateDir });
+    await run(); // establishes the synced baseline
+    fs.writeFileSync(titleFile(work), JSON.stringify({ sessionId: 'local_a', title: 'New name' }));
+    await run();
+    for (const profile of [personal, work]) assert.equal(JSON.parse(fs.readFileSync(titleFile(profile), 'utf8')).title, 'New name');
+    await run(); // stays renamed on the next sync
+    assert.equal(JSON.parse(fs.readFileSync(titleFile(work), 'utf8')).title, 'New name');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('encodes non-Latin-1 text and emoji round trip', () => {
   for (const text of ['plain', 'café', '你好', 'rocket 🚀']) {
     assert.equal(decodeLocalStorageValue(encodeLocalStorageValue(text)), text);
