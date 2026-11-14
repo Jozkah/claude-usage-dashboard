@@ -73,7 +73,8 @@ try {
   # Starting any account also starts the dashboard sync service, even without its own shortcut.
   & (Join-Path $PSScriptRoot 'start-dashboard.ps1')
   $mutex.ReleaseMutex()
-  Start-Process -FilePath $portableExe -WorkingDirectory $portable `
+  # Hidden PowerShell launchers must not pass their hidden window state to Claude.
+  Start-Process -FilePath $portableExe -WorkingDirectory $portable -WindowStyle Normal `
     -ArgumentList ('--user-data-dir=' + [char]34 + $userDataDir + [char]34)
 } catch {
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
