@@ -2,7 +2,7 @@
 # refreshed by hand or by a bot, and the Dependabot "docker" ecosystem (see .github/dependabot.yml)
 # bumps the tag. To pin exactly, use: FROM node:22-alpine@sha256:<digest>  (docker buildx imagetools inspect node:22-alpine).
 # --- build the web app ---
-FROM node:22-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Lockfile must be in sync; no silent fallback to `npm install`.
@@ -11,7 +11,7 @@ COPY . .
 RUN npm run build
 
 # --- runtime: server needs no packages (classic-level is optional and Windows-only) ---
-FROM node:22-alpine
+FROM node:25-alpine
 WORKDIR /app
 RUN apk add --no-cache tzdata
 ENV NODE_ENV=production \
