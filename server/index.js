@@ -26,6 +26,7 @@ import { visibleUsageWindows } from './plan-limits.js';
 import { nextUsagePollAt } from './usage-schedule.js';
 import { activeSessionState } from './session-activity.js';
 import { shareLocalChats } from './chat-sharing.js';
+import { importVscodeChats } from './vscode-chat-import.js';
 import { findWindowsDesktopProfiles, syncDesktopSessionRecordsMany, repairEmptyDesktopSessionRecords, repairStaleDesktopSessionRecords, alignDesktopSessionBranches, reconcileWorkSessionRecords } from './desktop-chat-sync.js';
 import { syncMergedDesktopLabelsMany, desktopLabelSyncStatus } from './desktop-label-sync.js';
 import { parseDesktopProcessState } from './desktop-process-state.js';
@@ -768,6 +769,7 @@ async function handler(req, res) {
       if (blocked(req, res)) return;
       try {
         const profiles = findWindowsDesktopProfiles();
+        importVscodeIntoDesktop(profiles);
         const result = syncDesktopSessionRecordsMany(profiles);
         const copied = { ...desktopSyncStatus.copied };
         for (const [id, count] of Object.entries(result.copied)) copied[id] = (copied[id] || 0) + count;
@@ -937,11 +939,21 @@ function startTokenScan() {
   round();
 }
 
+// VS Code extension chats become Desktop pointers in the Personal profile (default ~/.claude), then sync out like any other chat.
+function importVscodeIntoDesktop(profiles) {
+  try {
+    const { imported } = importVscodeChats(profiles.personal);
+    if (imported) console.log(`Desktop: imported ${imported} VS Code chats`);
+    return imported;
+  } catch (error) { console.warn(`VS Code chat import: ${error instanceof Error ? error.message : error}`); return 0; }
+}
+
 function startDesktopSync() {
   const timers = [];
   const syncNewDesktopRecords = () => {
     try {
       const profiles = findWindowsDesktopProfiles();
+      importVscodeIntoDesktop(profiles);
       const result = syncDesktopSessionRecordsMany(profiles,
         { minAgeMs: 2000, inspectConflicts: false });
       const scratch = linkScratchWorkspaces(profiles);

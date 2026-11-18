@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const GENERAL_ID = 'cg-8f581a18-52e0-43da-ab7f-cb6320805902';
 const folder = (value) => typeof value === 'string' ? path.win32.normalize(value).toLowerCase() : '';
@@ -26,6 +27,7 @@ export function organizeDesktopFolders(snapshot, participants) {
     byFolder.get(cwd).add(group);
   }
   const unresolved = [];
+  const fromVscode = [];
   let inferred = 0;
   for (const [id, record] of records) {
     if (assignments.has(id)) continue;
@@ -35,7 +37,25 @@ export function organizeDesktopFolders(snapshot, participants) {
     if (matches?.size === 1) {
       assignments.set(id, [...matches][0]);
       inferred++;
-    } else if (scratch(cwd)) unresolved.push(id);
+    } else if (record.adoptedFrom === 'vscode' && !scratch(cwd)) fromVscode.push([id, record]);
+    else if (scratch(cwd)) unresolved.push(id);
+  }
+  // Chats imported from the VS Code extension: one group per folder name, created on first use.
+  let vscodeGroups = 0;
+  const newGroup = (name) => {
+    const group = { id: `cg-${crypto.randomUUID()}`, name, mode: 'code' };
+    result.groups.push(group);
+    result.order.push([group.id, []]);
+    const template = result.manuals[0];
+    result.manuals.push({ ...(template ? structuredClone(template) : {}),
+      id: group.id, kind: 'manual', v: 2, name, order: result.manuals.length, members: [] });
+    return group;
+  };
+  for (const [id, record] of fromVscode) {
+    const name = path.win32.basename(path.win32.normalize(record.originCwd || record.cwd)) || 'VS Code';
+    let group = result.groups.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    if (!group) { group = newGroup(name); vscodeGroups++; }
+    assignments.set(id, group.id);
   }
   if (unresolved.length) {
     let general = result.groups.find((group) => group.name.toLowerCase() === 'general');
@@ -51,5 +71,5 @@ export function organizeDesktopFolders(snapshot, participants) {
     for (const id of unresolved) assignments.set(id, general.id);
   }
   result.assignments = [...assignments].sort(([a], [b]) => a.localeCompare(b));
-  return { snapshot: result, inferred, general: unresolved.length };
+  return { snapshot: result, inferred, general: unresolved.length, vscode: fromVscode.length, vscodeGroups };
 }
