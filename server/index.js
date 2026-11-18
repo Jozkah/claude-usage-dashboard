@@ -939,13 +939,18 @@ function startTokenScan() {
   round();
 }
 
-// VS Code extension chats become Desktop pointers in the Personal profile (default ~/.claude), then sync out like any other chat.
+// VS Code extension chats become Desktop pointers in the profile that owns their config folder
+// (~/.claude is Personal, ~/.claude-<name> is that profile), then sync to every other profile like any other chat.
 function importVscodeIntoDesktop(profiles) {
-  try {
-    const { imported } = importVscodeChats(profiles.personal);
-    if (imported) console.log(`Desktop: imported ${imported} VS Code chats`);
-    return imported;
-  } catch (error) { console.warn(`VS Code chat import: ${error instanceof Error ? error.message : error}`); return 0; }
+  let total = 0;
+  for (const [id, profile] of Object.entries(profiles)) {
+    const configDir = path.join(os.homedir(), id === 'personal' ? '.claude' : `.claude-${id}`);
+    if (!fs.existsSync(path.join(configDir, 'projects'))) continue;
+    try { total += importVscodeChats(profile, { configDir }).imported; }
+    catch (error) { console.warn(`VS Code chat import (${id}): ${error instanceof Error ? error.message : error}`); }
+  }
+  if (total) console.log(`Desktop: imported ${total} VS Code chats`);
+  return total;
 }
 
 function startDesktopSync() {
