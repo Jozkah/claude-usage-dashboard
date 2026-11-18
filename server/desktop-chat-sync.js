@@ -168,7 +168,8 @@ export function syncDesktopSessionRecords(personalProfile, workProfile, { minAge
         if (typeof record.sessionId === 'string' && !record.cliSessionId && !(Number(record.completedTurns) > 0)) continue;
         // Claude's live resume import creates a new pointer named after cliSessionId.
         // Copying either pointer again would create duplicate sidebar entries.
-        if (record.adoptedFromOtherSurface ||
+        // Pointers this dashboard wrote for VS Code chats (adoptedFrom) are the exception: they are named after the CLI session, so they never duplicate.
+        if ((record.adoptedFromOtherSurface && record.adoptedFrom !== 'vscode') ||
             (typeof record.cliSessionId === 'string' && /^[0-9a-f-]+$/i.test(record.cliSessionId) &&
              (targetMap.has(`local_${record.cliSessionId}.json`) || fs.existsSync(path.join(targetLeaf, `local_${record.cliSessionId}.json`))))) continue;
         fs.copyFileSync(from, temp, fs.constants.COPYFILE_EXCL);

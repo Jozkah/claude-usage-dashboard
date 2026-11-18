@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { importVscodeChats, findVscodeTranscripts } from './vscode-chat-import.js';
+import { syncDesktopSessionRecords } from './desktop-chat-sync.js';
 import { organizeDesktopFolders } from './desktop-folder-organizer.js';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -89,4 +90,17 @@ test('VS Code chats are grouped by folder name, reusing a group of that name', (
   assert.equal(assigned.get('code:local_c'), beta.id);
   assert.equal(assigned.has('code:local_d'), false);
   assert.ok(result.manuals.some((manual) => manual.id === beta.id));
+});
+
+test('imported VS Code chats are copied to the other profile like any chat', () => {
+  const { root, configDir, profile, stateDir } = setup();
+  try {
+    const other = path.join(root, 'other');
+    fs.mkdirSync(path.join(other, 'claude-code-sessions', 'acct2', 'device2'), { recursive: true });
+    importVscodeChats(profile, { configDir, stateDir });
+    const result = syncDesktopSessionRecords(profile, other, { stateDir });
+    assert.equal(result.toWork, 2);
+    const copied = fs.readdirSync(path.join(other, 'claude-code-sessions', 'acct2', 'device2')).filter((name) => name.startsWith('local_'));
+    assert.deepEqual(copied.sort(), [`local_${A}.json`, `local_${B}.json`]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
