@@ -109,6 +109,7 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
   let skills = 0;
   let commands = 0;
   let agents = 0;
+  let instructions = 0;
   const copyUnit = (from, to) => {
     let top = path.dirname(to);
     while (!fs.existsSync(path.dirname(top)) && path.dirname(top) !== top) top = path.dirname(top);
@@ -141,6 +142,20 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
       }
     }
     ({ skills } = counts); commands = counts.commands; agents = counts.agents;
+    // Global instructions (CLAUDE.md), rules and hooks also travel, again only where the account has none of its own.
+    const claudeMd = path.join(source, 'CLAUDE.md');
+    if (fs.existsSync(claudeMd) && !fs.existsSync(path.join(target, 'CLAUDE.md'))) { copyUnit(claudeMd, path.join(target, 'CLAUDE.md')); instructions++; }
+    for (const kind of ['rules', 'hooks']) {
+      const from = path.join(source, kind);
+      if (!fs.existsSync(from)) continue;
+      for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+        if (entry.name.endsWith('.tmp') || entry.name.includes('.sync-') || entry.name === '__pycache__') continue;
+        const destination = path.join(target, kind, entry.name);
+        if (fs.existsSync(destination)) continue;
+        copyUnit(path.join(from, entry.name), destination);
+        instructions++;
+      }
+    }
     for (const [file, loaded, next] of [[installedFile, targetInstalledLoaded, targetInstalled],
       [knownFile, targetKnownLoaded, targetKnown], [settingsFile, targetSettingsLoaded, targetSettings]]) {
       const revert = writeJsonIfChanged(file, loaded, next, stateDir);
@@ -151,5 +166,5 @@ export function syncCodeSetup(source, target, { stateDir } = {}) {
     for (const item of created.reverse()) fs.rmSync(item, { recursive: true, force: true });
     throw error;
   }
-  return { plugins, marketplaces, skills, commands, agents, settings };
+  return { plugins, marketplaces, skills, commands, agents, instructions, settings };
 }

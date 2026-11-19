@@ -25,7 +25,7 @@ export function syncAllAccounts(accounts, { stateDir, share = shareLocalChats, s
     list.push(account);
   }
   const [hub, ...others] = list;
-  const results = others.map((account) => ({ id: account.id, name: account.name, chats: 'linked', setup: { skills: 0, commands: 0, agents: 0, plugins: 0, marketplaces: 0, settings: 0 }, errors: [] }));
+  const results = others.map((account) => ({ id: account.id, name: account.name, chats: 'linked', setup: { skills: 0, commands: 0, agents: 0, instructions: 0, plugins: 0, marketplaces: 0, settings: 0 }, errors: [] }));
   const byId = new Map(results.map((r) => [r.id, r]));
 
   fs.mkdirSync(path.join(hub.configDir, 'projects'), { recursive: true });
