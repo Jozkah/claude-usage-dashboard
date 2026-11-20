@@ -282,28 +282,13 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
   const pids = participants.map((participant) => participant.id);
   const baselines = loadState(stateDir, 'label-baselines', {});
   const baselineKey = [...pids].sort().join('|');
-  const source = sourceId && participants.find((participant) => participant.profileId === sourceId);
-  if (sourceId && !source) throw new Error(`Source Desktop profile not found: ${sourceId}`);
-  let merged = source
-    ? { ...snapshotOf(source), conflicts: [] }
-    : mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
-      { baseline: baselines[baselineKey] || null, ids: pids });
-  if (source) {
-    // Personal controls explicit choices; retain unique assignments for its ungrouped chats.
-    const assigned = new Map(/** @type {[string, string][]} */ (merged.assignments));
-    const validGroups = new Set(merged.groups.map((group) => group.id));
-    const candidates = new Map();
-    for (const participant of participants) {
-      for (const [chat, group] of snapshotOf(participant).assignments) {
-        if (assigned.has(chat) || !validGroups.has(group)) continue;
-        if (!candidates.has(chat)) candidates.set(chat, new Set());
-        candidates.get(chat).add(group);
-      }
-    }
-    for (const [chat, groups] of candidates) if (groups.size === 1) assigned.set(chat, [...groups][0]);
-    merged.assignments = [...assigned];
-    merged = { ...organizeDesktopFolders(merged, participants).snapshot, conflicts: [] };
-  }
+  if (sourceId && !participants.some((participant) => participant.profileId === sourceId)) throw new Error(`Source Desktop profile not found: ${sourceId}`);
+  // Groups and sections merge three-way against the last agreed baseline. A running Desktop keeps its newest sidebar
+  // in memory, so its files lag behind; treating any one profile's files as the master would overwrite a group or
+  // section created elsewhere the next time that profile closes. A profile's own additions therefore always survive.
+  let merged = mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
+    { baseline: baselines[baselineKey] || null, ids: pids });
+  if (sourceId) merged = { ...organizeDesktopFolders(merged, participants).snapshot, conflicts: merged.conflicts };
   const targets = participants.filter((participant) => targetIds.includes(participant.profileId));
   const titles = syncDesktopTitles(participants, targets, stateDir, sourceId);
   let updated = 0;

@@ -179,7 +179,7 @@ async function makeProfile(root, name, { owner = `${name}-scope`, chats = ['a'],
   return profile;
 }
 
-test('Personal controls group assignments and titles across three profiles', async () => {
+test('Personal wins titles, while every profile keeps its own groups', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-personal-labels-'));
   try {
     const group = { id: 'personal-group', name: 'Personal project' };
@@ -193,8 +193,8 @@ test('Personal controls group assignments and titles across three profiles', asy
     await syncMergedDesktopLabelsMany({ personal, work, third }, { targetIds: ['work', 'third'], sourceId: 'personal', stateDir });
     for (const profile of [work, third]) {
       const snapshot = desktopLabelSnapshot(profile);
-      assert.deepEqual(snapshot.groups, [group]);
-      assert.deepEqual(snapshot.assignments, [['code:local_a', group.id]]);
+      assert.deepEqual(snapshot.groups.map((entry) => entry.name).sort(), ['Other', 'Personal project']);
+      assert.equal(snapshot.assignments.length, 1);
       assert.equal(JSON.parse(fs.readFileSync(titleFile(profile), 'utf8')).title, 'Personal title');
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -296,5 +296,17 @@ test('profile with several sidebar scopes syncs the signed-in one and leaves the
     // Backups go to the dedicated folder, not next to the config.
     assert.equal(fs.readdirSync(work).some((name) => name.includes('.backup-')), false);
     assert.ok(listBackups(configPath).length >= 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a group created in one profile survives syncing from a Personal that lacks it', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-new-group-'));
+  try {
+    const old = { id: 'old', name: 'Old' };
+    const fresh = { id: 'fresh', name: 'Fresh section' };
+    const personal = await makeProfile(root, 'personal', { groups: [old] });
+    const work = await makeProfile(root, 'work', { groups: [old, fresh] });
+    await syncMergedDesktopLabelsMany({ personal, work }, { targetIds: ['work'], sourceId: 'personal', stateDir });
+    assert.deepEqual(desktopLabelSnapshot(work).groups.map((entry) => entry.name).sort(), ['Fresh section', 'Old']);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
