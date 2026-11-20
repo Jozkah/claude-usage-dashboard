@@ -271,6 +271,49 @@ export async function syncMergedDesktopLabels(personalProfile, workProfile, { ta
   });
 }
 
+// A chat moved in one profile must win over the unchanged copies elsewhere. The shared baseline is only saved when every
+// profile syncs together, so each profile also remembers what it held at the last sync: a profile whose assignment differs
+// from that memory moved the chat since, and the newest such move (by config file time) is the result.
+const seenKey = (participant) => `${path.resolve(participant.profilePath)}|${participant.scope}`;
+
+function applyLatestMoves(merged, participants, snapshots, lastSeen) {
+  const lower = (value) => String(value ?? '').toLocaleLowerCase();
+  const idByKey = new Map(merged.groups.map((group) => [lower(group.name), group.id]));
+  const nameOf = (snapshot, groupId) => lower(snapshot.groups.find((group) => group.id === groupId)?.name);
+  const views = snapshots.map((snapshot, index) => {
+    const known = snapshot.known ? new Set(snapshot.known) : null;
+    const current = new Map(snapshot.assignments.map(([chat, groupId]) => [chat, nameOf(snapshot, groupId)]));
+    let time = 0;
+    try { time = fs.statSync(participants[index].configPath).mtimeMs; } catch { /* unreadable: oldest */ }
+    return { id: participants[index].id, known, current, last: lastSeen[seenKey(participants[index])], time };
+  });
+  const assignments = new Map(merged.assignments);
+  const chats = new Set([...assignments.keys(), ...views.flatMap((view) => [...view.current.keys()])]);
+  const moves = new Map(); // chat -> new group id (null: ungrouped)
+  for (const chat of chats) {
+    const moved = views.filter((view) => view.last && (!view.known || !chat.startsWith('code:') || view.known.has(chat))
+      && (view.current.get(chat) ?? null) !== (view.last[chat] ?? null));
+    if (!moved.length) continue;
+    const winner = moved.sort((a, b) => b.time - a.time)[0];
+    const key = winner.current.get(chat);
+    const target = key ? idByKey.get(key) : null;
+    if (key && !target) continue; // its group is gone from the merged set
+    if (target) assignments.set(chat, target); else assignments.delete(chat);
+    moves.set(chat, target ?? null);
+  }
+  if (!moves.size) return merged;
+  const result = [...assignments].sort(([a], [b]) => a.localeCompare(b));
+  // Only the moved chats change place in the per-group lists; everything else keeps the merged order.
+  const place = (groupId, members) => {
+    const kept = members.filter((chat) => !moves.has(chat));
+    for (const [chat, target] of moves) if (target === groupId) kept.push(chat);
+    return kept;
+  };
+  const order = merged.order.map(([groupId, members]) => [groupId, place(groupId, members)]);
+  const manuals = merged.manuals.map((manual) => manual.members ? { ...manual, members: place(manual.id, manual.members) } : manual);
+  return { ...merged, assignments: result, order, manuals };
+}
+
 /** @param {Record<string, string>} profiles @param {{ targetIds?: string[], stateDir?: string, sourceId?: string }} [options] */
 export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object.keys(profiles), stateDir, sourceId } = {}) {
   const ids = Object.keys(profiles);
@@ -289,6 +332,9 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
   let merged = mergeDesktopLabelSnapshotsThreeWay(participants.map(snapshotOf),
     { baseline: baselines[baselineKey] || null, ids: pids });
   if (sourceId) merged = { ...organizeDesktopFolders(merged, participants).snapshot, conflicts: merged.conflicts };
+  const snapshots = participants.map(snapshotOf);
+  const lastSeen = loadState(stateDir, 'label-lastseen', {});
+  merged = applyLatestMoves(merged, participants, snapshots, lastSeen);
   const targets = participants.filter((participant) => targetIds.includes(participant.profileId));
   const titles = syncDesktopTitles(participants, targets, stateDir, sourceId);
   let updated = 0;
@@ -348,6 +394,18 @@ export async function syncMergedDesktopLabelsMany(profiles, { targetIds = Object
     }
   }
   if (failures.length) throw new Error(failures.join('; '));
+  // Remember what each profile holds now: the merged layout for written targets, its own for the rest.
+  const mergedKeys = (snapshot, known) => Object.fromEntries(merged.assignments
+    .filter(([chat]) => !known || !chat.startsWith('code:') || known.has(chat))
+    .map(([chat, groupId]) => [chat, String(merged.groups.find((group) => group.id === groupId)?.name ?? '').toLocaleLowerCase()]));
+  participants.forEach((participant, index) => {
+    const snapshot = snapshots[index];
+    const known = snapshot.known ? new Set(snapshot.known) : null;
+    const written = targets.includes(participant) && !skippedScopes.includes(participant.profileId);
+    lastSeen[seenKey(participant)] = written ? mergedKeys(snapshot, known)
+      : Object.fromEntries(snapshot.assignments.map(([chat, groupId]) => [chat, String(snapshot.groups.find((group) => group.id === groupId)?.name ?? '').toLocaleLowerCase()]));
+  });
+  saveState(stateDir, 'label-lastseen', lastSeen);
   // Remember what every profile now agrees on, so later runs can tell deletions from additions.
   if (targetIds.length === ids.length) {
     baselines[baselineKey] = { profiles: pids, groups: merged.groups, assignments: merged.assignments,

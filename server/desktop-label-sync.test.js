@@ -310,3 +310,32 @@ test('a group created in one profile survives syncing from a Personal that lacks
     assert.deepEqual(desktopLabelSnapshot(work).groups.map((entry) => entry.name).sort(), ['Fresh section', 'Old']);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a chat moved in the second profile is not reverted by the first profile, even after a partial sync', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-move-'));
+  try {
+    const g = [{ id: 'g1', name: 'One' }, { id: 'g2', name: 'Two' }, { id: 'g3', name: 'Three' }];
+    const personal = await makeProfile(root, 'personal', { groups: g, assignments: { 'code:local_a': 'g1' } });
+    const work = await makeProfile(root, 'work', { groups: g, assignments: { 'code:local_a': 'g1' } });
+    const run = (targetIds) => syncMergedDesktopLabelsMany({ personal, work }, { targetIds, sourceId: 'personal', stateDir });
+    const move = (profile, group) => {
+      const file = path.join(profile, 'claude_desktop_config.json');
+      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+      config.preferences.epitaxyPrefs['dframe-group-scopes'][`${path.basename(profile)}-scope`].assignments['code:local_a'] = group;
+      fs.writeFileSync(file, JSON.stringify(config));
+      const later = new Date(Date.now() + 5000 * (move.n = (move.n || 0) + 1));
+      fs.utimesSync(file, later, later);
+    };
+    const groupOf = (profile) => desktopLabelSnapshot(profile).assignments.find(([chat]) => chat === 'code:local_a')?.[1];
+    await run(['personal', 'work']);
+    move(work, 'g2');
+    await run(['personal']); // work is open: only personal is written
+    assert.equal(groupOf(personal), 'g2');
+    move(work, 'g3');
+    await run(['personal']);
+    assert.equal(groupOf(personal), 'g3');
+    await run(['personal', 'work']);
+    assert.equal(groupOf(work), 'g3');
+    assert.equal(groupOf(personal), 'g3');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
