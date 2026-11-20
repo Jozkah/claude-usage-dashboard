@@ -74,8 +74,11 @@ try {
   & (Join-Path $PSScriptRoot 'start-dashboard.ps1')
   $mutex.ReleaseMutex()
   # Hidden PowerShell launchers must not pass their hidden window state to Claude.
+  # A loopback-only debug port lets the dashboard apply sidebar moves inside the running app (see server/desktop-live-sync.js).
+  $ports = @{ Work = 9231; Third = 9232; Work2 = 9233 }
+  $port = if ($ports.ContainsKey($Name)) { $ports[$Name] } else { 9240 + ([Math]::Abs($Name.ToLowerInvariant().GetHashCode()) % 50) }
   Start-Process -FilePath $portableExe -WorkingDirectory $portable -WindowStyle Normal `
-    -ArgumentList ('--user-data-dir=' + [char]34 + $userDataDir + [char]34)
+    -ArgumentList ('--user-data-dir=' + [char]34 + $userDataDir + [char]34), "--remote-debugging-port=$port", '--remote-debugging-address=127.0.0.1'
 } catch {
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
   Add-Content -LiteralPath (Join-Path $logDir 'launcher.log') -Value "$(Get-Date -Format o) [$Name] $($_.Exception.Message)"
